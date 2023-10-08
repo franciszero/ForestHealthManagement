@@ -35,31 +35,37 @@ class Foo:
 
             hdf = SD(os.path.join(self.hdf_path, hdf_file), SDC.READ)
             for idx, sds in enumerate(hdf.datasets().keys()):
-                print("\t%-40s" % sds, end=" ")
+                # get dataset
                 ds = hdf.select(sds)
-                arr = ds[:]
 
-                is_break = False
-                if "NDVI" in sds:
-                    self.ndvi.append(arr)
-                elif "EVI" in sds:
-                    self.evi.append(arr)
-                else:
-                    is_break = True
-
+                # check folder
                 sds = sds.replace(' ', '_')
                 pth = f"{self.rootpath}/{sds}"
                 if not os.path.exists(pth):
                     os.makedirs(pth)
+
+                # check file
                 fp = f"{pth}/{dt}.png"
-                if not os.path.exists(fp):
-                    print(f"plotting map {fp}")
-                    self.__plot_map(arr, sds, fp)
-                else:
-                    print(f"skipping plot {fp}")
-                    if is_break:
-                        break
+                arr = None
+                if not os.path.exists(fp) or "NDVI" in sds or "EVI" in sds:
+                    print("\t%-40s" % sds, end=" ")
+                    arr = ds[:]
+
+                    # plot map
+                    if os.path.exists(fp):
+                        print(f"skipping plot {fp}")
+                    else:
+                        print(f"plotting map {fp}")
+                        self.__plot_map(arr, sds, fp)
+
+                    # cache map
+                    if "NDVI" in sds:
+                        self.ndvi.append(arr)
+                    elif "EVI" in sds:
+                        self.evi.append(arr)
             hdf.end()
+        self.ndvi = np.array(self.ndvi)
+        self.evi = np.array(self.evi)
 
     @staticmethod
     def __plot_map(arr, sds, fp):
@@ -77,10 +83,10 @@ class Foo:
         df = pd.DataFrame(index=range(len(self.dates)), columns=["dt", "ndvi", "evi"])
         df["dt"] = self.dates
         df['dt'] = pd.to_datetime(df['dt'])
-        df["ndvi"] = np.array(self.ndvi)[:, x, y]
-        df["evi"] = np.array(self.evi)[:, x, y]
-        # 使用 pd.melt 重塑 DataFrame
+        df["ndvi"] = self.ndvi[:, x, y]
+        df["evi"] = self.evi[:, x, y]
         df = pd.melt(df, id_vars=['dt'], value_vars=['ndvi', 'evi'], var_name='hue', value_name='val')
+
         sns.lineplot(data=df, x='dt', y='val', hue='hue')
         fp = f"%s/%4d_%4d.png" % (pth, x, y)
         plt.savefig(fp)
@@ -95,5 +101,3 @@ if __name__ == "__main__":
     for x1 in range(0, 4800, 500):
         for y1 in range(0, 4800, 500):
             foo.plot_time_series(x1, y1)
-
-    i = 0
