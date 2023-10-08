@@ -13,15 +13,6 @@ class Foo:
         self.hdf_path = f'{self.rootpath}/data'
         self.hdf_files = sorted([f for f in os.listdir(self.hdf_path) if f.endswith('.hdf')],
                                 key=self.__extract_date_from_filename)
-
-        # # Check if saved data exists
-        # self.__is_data_saved = False
-        # if os.path.exists(os.path.join(self.rootpath, 'ndvi.npy')) and \
-        #         os.path.exists(os.path.join(self.rootpath, 'evi.npy')) and \
-        #         os.path.exists(os.path.join(self.rootpath, 'dates.npy')):
-        #     self.__data_saved = True
-        #     self.load_data()
-        # else:
         self.ndvi = []
         self.evi = []
         self.dates = []
@@ -47,10 +38,14 @@ class Foo:
                 print("\t%-40s" % sds, end=" ")
                 ds = hdf.select(sds)
                 arr = ds[:]
+
+                is_break = False
                 if "NDVI" in sds:
                     self.ndvi.append(arr)
-                if "EVI" in sds:
+                elif "EVI" in sds:
                     self.evi.append(arr)
+                else:
+                    is_break = True
 
                 sds = sds.replace(' ', '_')
                 pth = f"{self.rootpath}/{sds}"
@@ -58,14 +53,13 @@ class Foo:
                     os.makedirs(pth)
                 fp = f"{pth}/{dt}.png"
                 if not os.path.exists(fp):
-                    print(f"plotting map {fp}", end=" ")
+                    print(f"plotting map {fp}")
                     self.__plot_map(arr, sds, fp)
                 else:
-                    print(f"skipping plot {fp}", end=" ")
-                print()
-
+                    print(f"skipping plot {fp}")
+                    if is_break:
+                        break
             hdf.end()
-        # self.save_data()
 
     @staticmethod
     def __plot_map(arr, sds, fp):
@@ -82,45 +76,24 @@ class Foo:
 
         df = pd.DataFrame(index=range(len(self.dates)), columns=["dt", "ndvi", "evi"])
         df["dt"] = self.dates
+        df['dt'] = pd.to_datetime(df['dt'])
         df["ndvi"] = np.array(self.ndvi)[:, x, y]
         df["evi"] = np.array(self.evi)[:, x, y]
-        sns.lineplot(data=df)
+        # 使用 pd.melt 重塑 DataFrame
+        df = pd.melt(df, id_vars=['dt'], value_vars=['ndvi', 'evi'], var_name='hue', value_name='val')
+        sns.lineplot(data=df, x='dt', y='val', hue='hue')
         fp = f"%s/%4d_%4d.png" % (pth, x, y)
         plt.savefig(fp)
         print(f"plot saved at {fp}")
         plt.clf()
 
-        # plt.plot(self.dates, ts1, marker='o', linestyle='-', color='b')
-        # plt.plot(self.dates, ts2, marker='o', linestyle='-', color='b')
-        # plt.title(f"Time Series for Pixel ({x}, {y})")
-        # plt.xlabel("Date")
-        # plt.ylabel("Vegetation Indices")
-        # plt.grid(True)
-        # plt.xticks(rotation=45)
-        # plt.tight_layout()
-        # plt.show()
-        # fp = f"%s/%4d_%4d.png" % (pth, x, y)
-        # if not os.path.exists(fp):
-        #     plt.savefig(fp)
-        # plt.clf()
-
-    def save_data(self):
-        np.save(os.path.join(self.rootpath, 'ndvi.npy'), self.ndvi)
-        # np.save(os.path.join(self.rootpath, 'evi.npy'), self.evi)
-        np.save(os.path.join(self.rootpath, 'dates.npy'), self.dates)
-
-    def load_data(self):
-        self.ndvi = np.load(os.path.join(self.rootpath, 'ndvi.npy'), allow_pickle=True).tolist()
-        self.evi = np.load(os.path.join(self.rootpath, 'evi.npy'), allow_pickle=True).tolist()
-        self.dates = np.load(os.path.join(self.rootpath, 'dates.npy'), allow_pickle=True).tolist()
-
 
 if __name__ == "__main__":
     foo = Foo()
 
-    plt.figure(figsize=(12, 6))
-    for x in range(0, 5000, 1000):
-        for y in range(0, 5000, 1000):
+    plt.figure(figsize=(12, 4))
+    for x in range(0, 4800, 500):
+        for y in range(0, 4800, 500):
             foo.plot_time_series(x, y)
 
     i = 0
