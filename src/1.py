@@ -92,8 +92,8 @@ if __name__ == "__main__":
     foo = Foo()
 
     plt.figure(figsize=(12, 4))
-    for x in range(0, 4800, 500):
-        for y in range(0, 4800, 500):
-            foo.plot_time_series(x, y)
+    for x1 in range(0, 4800, 500):
+        for y1 in range(0, 4800, 500):
+            foo.plot_time_series(x1, y1)
 
     i = 0
