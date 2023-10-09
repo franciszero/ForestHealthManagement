@@ -13,8 +13,8 @@ class Foo:
         self.hdf_path = f'{self.rootpath}/data'
         self.hdf_files = sorted([f for f in os.listdir(self.hdf_path) if f.endswith('.hdf')],
                                 key=self.__extract_date_from_filename)
-        self.ndvi = []
-        self.evi = []
+        self.ndvi = np.zeros((len(self.hdf_files), 4800, 4800))
+        # self.evi = np.zeros((len(self.hdf_files), 4800, 4800))
         self.dates = []
         self.__foo()
         pass
@@ -46,8 +46,7 @@ class Foo:
 
                 # check file
                 fp = f"{pth}/{dt}.png"
-                arr = None
-                if not os.path.exists(fp) or "NDVI" in sds or "EVI" in sds:
+                if not os.path.exists(fp) or "NDVI" in sds:  # or "EVI" in sds:
                     print("\t%-40s" % sds, end=" ")
                     arr = ds[:]
 
@@ -60,12 +59,12 @@ class Foo:
 
                     # cache map
                     if "NDVI" in sds:
-                        self.ndvi.append(arr)
-                    elif "EVI" in sds:
-                        self.evi.append(arr)
+                        self.ndvi[idx] = arr
+                    # elif "EVI" in sds:
+                    #     self.evi[idx] = arr
             hdf.end()
-        self.ndvi = np.array(self.ndvi)
-        self.evi = np.array(self.evi)
+        # self.ndvi = np.array(self.ndvi)
+        # self.evi = np.array(self.evi)
 
     @staticmethod
     def __plot_map(arr, sds, fp):
@@ -84,8 +83,11 @@ class Foo:
         df["dt"] = self.dates
         df['dt'] = pd.to_datetime(df['dt'])
         df["ndvi"] = self.ndvi[:, x, y]
-        df["evi"] = self.evi[:, x, y]
-        df = pd.melt(df, id_vars=['dt'], value_vars=['ndvi', 'evi'], var_name='hue', value_name='val')
+        # df["evi"] = self.evi[:, x, y]
+        df = pd.melt(df, id_vars=['dt'],
+                     value_vars=['ndvi'],  # , 'evi'],
+                     var_name='hue',
+                     value_name='val')
 
         sns.lineplot(data=df, x='dt', y='val', hue='hue')
         fp = f"%s/%4d_%4d.png" % (pth, x, y)
