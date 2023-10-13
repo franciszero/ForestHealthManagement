@@ -52,7 +52,7 @@ class Foo:
         for hdf_file in self.hdf_files:
             dt = self.__extract_date_from_filename(hdf_file)
             # dt_obj = datetime.strptime(dt, '%Y-%m-%d')
-            # if not dt_obj.year <= 2018:
+            # if not dt_obj.year <= 2019:
             #     continue
             print(dt)
             self.dates.append(dt)
@@ -130,9 +130,9 @@ class Foo:
 
     def compute_sg(self):
         year_sg = defaultdict(lambda: np.zeros((self.NDVI.shape[1], self.NDVI.shape[2])))
-        for i, date in enumerate([datetime.strptime(s, '%Y-%m-%d') for s in self.dates]):
+        for idx, date in enumerate([datetime.strptime(s, '%Y-%m-%d') for s in self.dates]):
             if 4 <= date.month <= 6:
-                ndvi_without_water = np.where(self.NDVI[i, :, :] == -3000, 0, self.NDVI[i, :, :])
+                ndvi_without_water = np.where(self.NDVI[idx, :, :] == -3000, 0, self.NDVI[idx, :, :])
                 year_sg[date.year] += ndvi_without_water
         self.years = np.array(sorted(list(year_sg.keys())))
         self.sg_values = np.array([year_sg[year] for year in self.years])
@@ -140,12 +140,15 @@ class Foo:
         np.save('sg_years.npy', self.years)
         return
 
-    def linear_regress(self, period=2):
-        years_col = self.years[:, np.newaxis, np.newaxis]
-        x_mean = np.mean(years_col)
-        y_mean = np.mean(self.sg_values, axis=0)
+    def linear_regress(self, start_idx, end_idx, start_year, end_year):
+        yrs = self.years[start_idx: end_idx + 1]
+        sgs = self.sg_values[start_idx:end_idx + 1, :, :]
 
-        num = np.sum((years_col - x_mean) * (self.sg_values - y_mean), axis=0)
+        years_col = yrs[:, np.newaxis, np.newaxis]
+        x_mean = np.mean(years_col)
+        y_mean = np.mean(sgs, axis=0)
+
+        num = np.sum((years_col - x_mean) * (sgs - y_mean), axis=0)
         den = np.sum((years_col - x_mean) ** 2)
 
         # Calculate slope and intercept
@@ -153,9 +156,9 @@ class Foo:
         self.intercepts = y_mean - self.slopes * x_mean
 
         # Calculate covariance and variance for r_value calculation
-        covariance = np.sum((self.years[:, np.newaxis, np.newaxis] - x_mean) * (self.sg_values - y_mean), axis=0)
-        variance_x = np.sum((self.years - x_mean.squeeze()) ** 2)
-        variance_y = np.sum((self.sg_values - y_mean) ** 2, axis=0)
+        covariance = np.sum((yrs[:, np.newaxis, np.newaxis] - x_mean) * (sgs - y_mean), axis=0)
+        variance_x = np.sum((yrs - x_mean.squeeze()) ** 2)
+        variance_y = np.sum((sgs - y_mean) ** 2, axis=0)
         denominator = variance_x * variance_y
         self.r_values = np.where(variance_y != 0, covariance / np.sqrt(denominator), 0)
 
@@ -171,11 +174,11 @@ class Foo:
         self.std_errs = np.sqrt((1 - self.r_values ** 2) * np.var(self.sg_values, axis=0) / (n - 2))
         return
 
-    def classify_pixels(self):
-        cur_year = self.years[-1]
+    def classify_pixels(self, start_year, end_year):
+        year_range = "%s~%s" % (start_year, end_year)
 
         # mark water region
-        p_val = np.where(self.p_values[:, :] == 1, self.p_val_nan, self.p_values[:, :])
+        p_val = np.where(self.sg_values == 0, self.p_val_nan, self.p_values)
 
         self.pixel_classes = np.zeros_like(p_val, dtype=int)
         self.pixel_classes[p_val <= 0.001] = 3
@@ -183,18 +186,19 @@ class Foo:
         self.pixel_classes[(p_val > 0.01) & (p_val <= 0.05)] = 1
         self.pixel_classes[(p_val <= 1) & (p_val > 0.05)] = 0
         self.pixel_classes[p_val == self.p_val_nan] = -1
+        np.save(f'sg_clf_training_data_{end_year}.npy', self.pixel_classes)
 
         fig, ax = plt.subplots(figsize=(10, 10))
         cmap = plt.get_cmap('RdYlGn_r')
         cax = ax.imshow(self.pixel_classes, cmap=cmap)
         cbar = fig.colorbar(cax, ticks=[-1, 0, 1, 2, 3], orientation='vertical')
         cbar.ax.set_yticklabels(['water', 'Healthy', 'Uncertain', 'Declining', 'Severely Declining'])
-        ax.set_title('Forest Health Classification based on SG trend %s' % cur_year)
+        ax.set_title('Forest Health Classification based on SG trend %s' % year_range)
 
         pth = f"{self.rootpath}/clf"
         if not os.path.exists(pth):
             os.makedirs(pth)
-        fp = f"%s/yearly_SG_trend_%s.png" % (pth, cur_year)
+        fp = f"%s/yearly_SG_trend_%s.png" % (pth, year_range)
         plt.savefig(fp)
         print(f"plot saved at {fp}")
         plt.clf()
@@ -309,7 +313,7 @@ class SGAna:
         return
 
     def classify_pixels(self):
-        cur_year = self.years[-1] # mark water region
+        cur_year = self.years[-1]  # mark water region
         p_val = np.where(self.sg_values[0, :, :] == 1, self.p_val_nan, self.p_values[0, :, :])
 
         self.pixel_classes = np.zeros_like(p_val, dtype=int)
@@ -389,10 +393,18 @@ class SGAna:
 
 
 if __name__ == "__main__":
+
     foo = Foo()
-    foo.compute_sg()
-    foo.linear_regress()
-    foo.classify_pixels()
+    foo.compute_sg()  # save sg values
+
+    pe = 5
+    for i, year in enumerate(foo.years):
+        if i + pe - 1 >= len(foo.years):
+            break
+        else:
+            print(year, "~", year + pe - 1)
+            foo.linear_regress(i, i + pe - 1, year, year + pe - 1)
+            foo.classify_pixels(year, year + pe - 1)  # save sg clf training data
 
     # ana = SGAna(foo)
     # ana.analyze()
