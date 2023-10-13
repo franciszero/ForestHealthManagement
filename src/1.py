@@ -41,13 +41,13 @@ class Foo:
 
     @staticmethod
     def __extract_date_from_filename(fn):
-        year = int(fn[9:13])
+        y = int(fn[9:13])
         doy = int(fn[13:16])  # day of year
-        date = datetime(year, 1, 1) + timedelta(doy - 1)
+        date = datetime(y, 1, 1) + timedelta(doy - 1)
         return date.strftime('%Y-%m-%d')
 
     def __foo(self):
-        plt.figure(figsize=(10, 10))
+        fig, ax = plt.figure(figsize=(10, 10))
         idx = 0
         for hdf_file in self.hdf_files:
             dt = self.__extract_date_from_filename(hdf_file)
@@ -89,7 +89,7 @@ class Foo:
             idx += 1
             hdf.end()
         self.NDVI = self.NDVI[:len(self.dates), :, :]
-
+        plt.close(fig)
         # fig, ax0 = plt.subplots(figsize=(12, 4))
         # for x1 in range(0, 4800, 500):
         #     for y1 in range(0, 4800, 500):
@@ -174,11 +174,11 @@ class Foo:
         self.std_errs = np.sqrt((1 - self.r_values ** 2) * np.var(self.sg_values, axis=0) / (n - 2))
         return
 
-    def classify_pixels(self, start_year, end_year):
+    def classify_pixels(self, end_idx, start_year, end_year):
         year_range = "%s~%s" % (start_year, end_year)
 
         # mark water region
-        p_val = np.where(self.sg_values == 0, self.p_val_nan, self.p_values)
+        p_val = np.where(self.sg_values[end_idx, :, :] == 0, self.p_val_nan, self.p_values)
 
         self.pixel_classes = np.zeros_like(p_val, dtype=int)
         self.pixel_classes[p_val <= 0.001] = 3
@@ -201,7 +201,7 @@ class Foo:
         fp = f"%s/yearly_SG_trend_%s.png" % (pth, year_range)
         plt.savefig(fp)
         print(f"plot saved at {fp}")
-        plt.clf()
+        plt.close(fig)
         return
 
     def plot_classification(self):
@@ -404,7 +404,7 @@ if __name__ == "__main__":
         else:
             print(year, "~", year + pe - 1)
             foo.linear_regress(i, i + pe - 1, year, year + pe - 1)
-            foo.classify_pixels(year, year + pe - 1)  # save sg clf training data
+            foo.classify_pixels(i + pe - 1, year, year + pe - 1)  # save sg clf training data
 
     # ana = SGAna(foo)
     # ana.analyze()
