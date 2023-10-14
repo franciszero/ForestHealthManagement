@@ -1,0 +1,5 @@
+*.tif
+*.nc
+.idea
+*.npy
+*.hdf

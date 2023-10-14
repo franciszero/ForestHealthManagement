@@ -53,9 +53,9 @@ class Foo:
         idx = 0
         for hdf_file in self.hdf_files:
             dt = self.__extract_date_from_filename(hdf_file)
-            # dt_obj = datetime.strptime(dt, '%Y-%m-%d')
-            # if not dt_obj.year <= 2019:
-            #     continue
+            dt_obj = datetime.strptime(dt, '%Y-%m-%d')
+            if not dt_obj.year <= 2010:
+                continue
             print(dt)
             self.dates.append(dt)
 
@@ -81,41 +81,35 @@ class Foo:
                         print(f"skipping plot {fp}")
                     else:
                         print(f"plotting map {fp}")
-                        self.__plot_map(arr, sds, fp)
+                    if self.VI_name in sds:
+                        self.__plot_map(arr, dt, sds, fp)
 
                     # cache map
-                    if "NDVI" in sds:
-                        self.NDVI[idx, :, :] = arr
-                    # elif "EVI" in sds:
-                    #     self.VIs[self.iEVI, idx, :, :] = arr
+                    self.NDVI[idx, :, :] = arr
             idx += 1
             hdf.end()
         self.NDVI = self.NDVI[:len(self.dates), :, :]
         plt.close(fig)
-        # fig, ax0 = plt.subplots(figsize=(12, 4))
-        # for x1 in range(0, 4800, 500):
-        #     for y1 in range(0, 4800, 500):
-        #         foo.__plot_time_series(ax0, x1, y1)
+
+        # fig, ax = plt.subplots(figsize=(16, 4))
+        # for x in range(0, 4800, 500):
+        #     for y in range(0, 4800, 500):
+        #         foo.__plot_time_series(ax, x, y)
 
     @staticmethod
-    def __plot_map(arr, sds, fp):
+    def __plot_map(arr, dt, sds, fp):
         plt.imshow(arr, cmap='RdYlGn')
         plt.colorbar(label=sds)
-        plt.title(sds)
+        plt.title(f"{sds}_{dt}")
         plt.savefig(fp)
         plt.clf()
 
     def __plot_time_series(self, ax, x, y):
-        pth = f"{self.rootpath}/time_series"
-        if not os.path.exists(pth):
-            os.makedirs(pth)
-
         df = pd.DataFrame(index=range(len(self.dates)), columns=["dt", "ndvi", "evi"])
         df["dt"] = self.dates
         df['dt'] = pd.to_datetime(df['dt'])
         df["ndvi"] = self.NDVI[:, x, y]
-        # df["evi"] = self.VIs[self.iEVI, :, x, y]
-        df = pd.melt(df, id_vars=['dt'], value_vars=['ndvi', 'evi'], var_name='hue', value_name='val')
+        df = pd.melt(df, id_vars=['dt'], value_vars=['ndvi'], var_name='hue', value_name='val')
 
         sns.lineplot(data=df, x='dt', y='val', hue='hue')
         # Setting grid, major ticks every year, minor ticks every month
@@ -125,6 +119,9 @@ class Foo:
         ax.xaxis.grid(True, which='minor', linestyle='--')
         ax.yaxis.grid(True)
 
+        pth = f"{self.rootpath}/time_series"
+        if not os.path.exists(pth):
+            os.makedirs(pth)
         fp = f"%s/%4d_%4d.png" % (pth, x, y)
         plt.savefig(fp)
         print(f"plot saved at {fp}")
@@ -138,8 +135,6 @@ class Foo:
                 year_sg[date.year] += ndvi_without_water
         self.years = np.array(sorted(list(year_sg.keys())))
         self.sg_values = np.array([year_sg[year] for year in self.years])
-        np.save('sg_values.npy', self.sg_values)
-        np.save('sg_years.npy', self.years)
         return
 
     def linear_regress(self, start_idx, end_idx, start_year, end_year):
@@ -185,7 +180,7 @@ class Foo:
         # mark water region
         p_val = np.where(self.sg_values[end_idx, :, :] == 0, self.p_val_nan, self.p_values)
 
-        self.pixel_classes = np.zeros_like(p_val, dtype=int)
+        self.pixel_classes = np.zeros_like(p_val, dtype=np.int8)
 
         self.pixel_classes[is_forest_growth & (p_val > 0.0001) & (p_val <= 0.001)] = -3
         self.pixel_classes[is_forest_decline & (p_val <= 0.001)] = 3
@@ -199,7 +194,7 @@ class Foo:
         self.pixel_classes[p_val == self.p_val_nan] = -4
 
         self.pixel_classes[(p_val <= 1) & (p_val > 0.05)] = 0
-        # np.save(f'sg_clf_training_data_{end_year}.npy', self.pixel_classes)
+        np.save(f'sg_clf_training_data_{end_year}.npy', self.pixel_classes)
 
         fig, ax = plt.subplots(figsize=(10, 10))
         colors = ['#1E1EFF',  # Aquatic Area
@@ -305,7 +300,7 @@ if __name__ == "__main__":
     foo = Foo()
     foo.compute_sg()  # save sg values
 
-    pe = 5
+    pe = 3
     for i, year in enumerate(foo.years):
         if i + pe - 1 >= len(foo.years):
             break
