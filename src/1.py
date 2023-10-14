@@ -11,6 +11,8 @@ from matplotlib.dates import YearLocator, MonthLocator
 from matplotlib.colors import ListedColormap, Normalize
 from matplotlib.ticker import MaxNLocator
 from statsmodels.tsa.seasonal import seasonal_decompose
+from scipy.interpolate import UnivariateSpline
+import matplotlib.dates as mdates
 
 
 class Foo:
@@ -74,7 +76,7 @@ class Foo:
         for hdf_file in self.hdf_files:
             dt = self.__extract_date_from_filename(hdf_file)
             # dt_obj = datetime.strptime(dt, '%Y-%m-%d')
-            # if not dt_obj.year <= 2010:
+            # if not dt_obj.year <= 2007:
             #     continue
             print(dt)
             self.dates.append(dt)
@@ -130,20 +132,20 @@ class Foo:
         ax.grid(which='minor', alpha=0.4)
         ax.grid(which='major', alpha=0.8)
 
-    def __get_ts(self, x, y):
+    def _get_ts(self, x, y):
         df = pd.DataFrame(index=range(len(self.dates)), columns=["dt", "ndvi"])
         df["dt"] = self.dates
         df['dt'] = pd.to_datetime(df['dt'])
         df["ndvi"] = self.NDVI[:, x, y]
         return df
 
-    def __plot_ax1(self, ax, dt, ts):
+    def _plot_ax1(self, ax, dt, ts):
         self.__set_grids(ax)
         ax.plot(dt, ts)
         ax.set_title('')
         ax.set_ylabel('NDVI Time Series')
 
-    def __plot_ax2(self, ax, dt, trend):
+    def _plot_ax2(self, ax, dt, trend):
         self.__set_grids(ax)
         tr = pd.DataFrame(index=range(len(dt)), columns=["dt", "trend"])
         tr["dt"] = dt
@@ -153,32 +155,42 @@ class Foo:
         ax.set_title('')
         ax.set_ylabel('Trend')
 
-    def __plot_ax3(self, ax, dt, seasonal):
+    def _plot_ax3(self, ax, dt, seasonal):
         self.__set_grids(ax)
         ax.plot(dt, seasonal)
         ax.set_title('')
         ax.set_ylabel('Seasonal')
 
-    def __plot_ax4(self, ax, dt, resid):
+    def _plot_ax4(self, ax, dt, resid):
         self.__set_grids(ax)
+
         markerline, stemline, baseline = ax.stem(dt, resid)
         plt.setp(markerline, 'markerfacecolor', 'blue', 'markersize', 1.2)
         plt.setp(stemline, 'linewidth', 0.2)
         plt.setp(baseline, 'linewidth', 0)
-        ax.fill_between(dt, resid, 0, facecolor='C0', alpha=0.4)
+
+        dt_num = mdates.date2num(dt)
+        smooth_x_num = np.linspace(dt_num.min(), dt_num.max(), 1000)
+        spline = UnivariateSpline(dt_num, resid.fillna(0), s=0)
+        smooth_y = spline(smooth_x_num)
+        smooth_x = mdates.num2date(smooth_x_num)
+
+        ax.fill_between(smooth_x, smooth_y, 0, facecolor='C0', alpha=0.4)
         ax.set_title('')
         ax.set_ylabel('Residual (Stem Plot)')
         ax.set_xlabel('Year')
 
     def plot_time_series(self, x, y, period=12 * 4):
-        df = self.__get_ts(x, y)
+        df = self._get_ts(x, y)
         result = seasonal_decompose(df['ndvi'], model='additive', period=period)
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, figsize=(10, 8))
-        fig.suptitle(f'NDVI Time Series Seasonal Decomposition {df["dt"]}')
-        self.__plot_ax1(ax1, df["dt"], df["ndvi"])
-        self.__plot_ax2(ax2, df["dt"], result.trend)
-        self.__plot_ax3(ax3, df["dt"], result.seasonal)
-        self.__plot_ax4(ax4, df["dt"], result.resid)
+        dt_range = "(%s ~ %s)" % (df["dt"].min().strftime("%Y-%m-%d"), df["dt"].max().strftime("%Y-%m-%d"))
+        fig.suptitle(f'NDVI Time Series Seasonal Decomposition {dt_range}')
+        self._plot_ax1(ax1, df["dt"], df["ndvi"])
+        self._plot_ax2(ax2, df["dt"], result.trend)
+        self._plot_ax3(ax3, df["dt"], result.seasonal)
+        self._plot_ax4(ax4, df["dt"], result.resid)
+        fig.tight_layout()
 
         pth = f"{self.rootpath}/time_series"
         if not os.path.exists(pth):
@@ -396,4 +408,4 @@ class Foo:
 
 if __name__ == "__main__":
     foo = Foo()
-    foo.process(48, 8)
+    foo.process(24, 8)
