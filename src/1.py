@@ -5,13 +5,12 @@ from datetime import datetime, timedelta
 import pandas as pd
 import seaborn as sns
 import numpy as np
-from scipy.stats import linregress, ttest_1samp
+from scipy.stats import linregress
 from collections import defaultdict
 from scipy.stats import t
-from matplotlib.ticker import MultipleLocator
 from matplotlib.dates import YearLocator, MonthLocator
-from matplotlib.colors import ListedColormap
 from matplotlib.colors import ListedColormap, Normalize
+from matplotlib.ticker import MaxNLocator
 
 
 class Foo:
@@ -53,9 +52,9 @@ class Foo:
         idx = 0
         for hdf_file in self.hdf_files:
             dt = self.__extract_date_from_filename(hdf_file)
-            dt_obj = datetime.strptime(dt, '%Y-%m-%d')
-            if not dt_obj.year <= 2010:
-                continue
+            # dt_obj = datetime.strptime(dt, '%Y-%m-%d')
+            # if not dt_obj.year <= 2010:
+            #     continue
             print(dt)
             self.dates.append(dt)
 
@@ -91,11 +90,6 @@ class Foo:
         self.NDVI = self.NDVI[:len(self.dates), :, :]
         plt.close(fig)
 
-        # fig, ax = plt.subplots(figsize=(16, 4))
-        # for x in range(0, 4800, 500):
-        #     for y in range(0, 4800, 500):
-        #         foo.__plot_time_series(ax, x, y)
-
     @staticmethod
     def __plot_map(arr, dt, sds, fp):
         plt.imshow(arr, cmap='RdYlGn')
@@ -104,20 +98,24 @@ class Foo:
         plt.savefig(fp)
         plt.clf()
 
-    def __plot_time_series(self, ax, x, y):
+    def plot_time_series(self, ax, x, y):
         df = pd.DataFrame(index=range(len(self.dates)), columns=["dt", "ndvi", "evi"])
         df["dt"] = self.dates
         df['dt'] = pd.to_datetime(df['dt'])
         df["ndvi"] = self.NDVI[:, x, y]
         df = pd.melt(df, id_vars=['dt'], value_vars=['ndvi'], var_name='hue', value_name='val')
 
-        sns.lineplot(data=df, x='dt', y='val', hue='hue')
+        ax = sns.lineplot(data=df, x='dt', y='val', hue='hue')
+        ax.set_title('NDVI Time Series')
+
         # Setting grid, major ticks every year, minor ticks every month
         ax.xaxis.set_major_locator(YearLocator())
         ax.xaxis.set_minor_locator(MonthLocator())
-        ax.xaxis.grid(True, which='major', linestyle='-')
-        ax.xaxis.grid(True, which='minor', linestyle='--')
-        ax.yaxis.grid(True)
+        ax.tick_params(axis='both', which='minor', size=0)
+
+        ax.grid(True, which='both', color='gray', linewidth=0.5, linestyle='--')
+        ax.grid(which='minor', alpha=0.4)
+        ax.grid(which='major', alpha=0.8)
 
         pth = f"{self.rootpath}/time_series"
         if not os.path.exists(pth):
@@ -134,7 +132,7 @@ class Foo:
                 ndvi_without_water = np.where(self.NDVI[idx, :, :] == -3000, 0, self.NDVI[idx, :, :])
                 year_sg[date.year] += ndvi_without_water
         self.years = np.array(sorted(list(year_sg.keys())))
-        self.sg_values = np.array([year_sg[year] for year in self.years])
+        self.sg_values = np.array([year_sg[y] for y in self.years])
         return
 
     def linear_regress(self, start_idx, end_idx, start_year, end_year):
@@ -171,7 +169,7 @@ class Foo:
         self.std_errs = np.sqrt((1 - self.r_values ** 2) * np.var(self.sg_values, axis=0) / (n - 2))
         return
 
-    def classify_pixels(self, end_idx, start_year, end_year):
+    def classify_pixels(self, end_idx, start_year, end_year, period):
         year_range = "%s~%s" % (start_year, end_year)
 
         is_forest_growth = self.slopes[:, :] >= 0
@@ -194,7 +192,11 @@ class Foo:
         self.pixel_classes[p_val == self.p_val_nan] = -4
 
         self.pixel_classes[(p_val <= 1) & (p_val > 0.05)] = 0
-        np.save(f'sg_clf_training_data_{end_year}.npy', self.pixel_classes)
+
+        pth = f"{self.rootpath}/data_training"
+        if not os.path.exists(pth):
+            os.makedirs(pth)
+        np.save(f'{pth}/sg_clf_training_data_{year_range}.npy', self.pixel_classes)
 
         fig, ax = plt.subplots(figsize=(10, 10))
         colors = ['#1E1EFF',  # Aquatic Area
@@ -238,7 +240,7 @@ class Foo:
         cbar.ax.set_yticklabels(ticks_dict.values())
         ax.set_title('Forest Health Classification based on SG trend %s' % year_range)
 
-        pth = f"{self.rootpath}/clf"
+        pth = f"{self.rootpath}/clf/{period}_years"
         if not os.path.exists(pth):
             os.makedirs(pth)
         fp = f"%s/yearly_SG_trend_%s.png" % (pth, year_range)
@@ -247,33 +249,19 @@ class Foo:
         plt.close(fig)
         return
 
-    def plot_classification(self):
-        cmap = plt.get_cmap('RdYlGn_r')
-        fig, ax = plt.subplots(figsize=(10, 10))
-        cax = ax.imshow(self.pixel_classes, cmap=cmap)
-        cbar = fig.colorbar(cax, ticks=[0, 1, 2, 3], orientation='vertical')
-        cbar.ax.set_yticklabels(['Healthy', 'Uncertain', 'Declining', 'Severely Declining'])
-        ax.set_title('Forest Health Classification based on SG trend')
-        plt.show()
-
-        pth = f"{self.rootpath}/clf"
-        if not os.path.exists(pth):
-            os.makedirs(pth)
-        fp = f"%s/%s.png" % (pth, max(self.dates).strftime('%Y-%m-%d'))
-        plt.savefig(fp)
-        print(f"plot saved at {fp}")
-        plt.clf()
-
     def plot_time_series_with_regression(self, x, y):
         pth = f"{self.rootpath}/time_series"
         if not os.path.exists(pth):
             os.makedirs(pth)
 
         df = pd.DataFrame(index=range(len(self.years)), columns=["dt", "ndvi"])
-        df["dt"] = self.years
+        df["dt"] = self.years.astype(int)
         df["ndvi"] = self.sg_values[:, x, y]
 
         slope, intercept, r_value, p_value, std_err = linregress(df["dt"].astype(int), df["ndvi"])
+
+        ax = plt.gca()
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
 
         plt.bar(df["dt"], df["ndvi"])
         plt.plot(df["dt"], slope * df["dt"].astype(int) + intercept, color='red')
@@ -296,11 +284,21 @@ class Foo:
 
 
 if __name__ == "__main__":
-
     foo = Foo()
-    foo.compute_sg()  # save sg values
+    fig0, ax0 = plt.subplots(figsize=(24, 4))
+    for x in range(0, 4800, 500):
+        for y in range(0, 4800, 500):
+            foo.plot_time_series(ax0, x, y)
+    plt.close(fig0)
 
-    pe = 3
+    foo.compute_sg()  # save sg values
+    fig0, ax0 = plt.subplots(figsize=(12, 4))
+    for x1 in range(0, 4800, 500):
+        for y1 in range(0, 4800, 500):
+            foo.plot_time_series_with_regression(x1, y1)
+    plt.close(fig0)
+
+    pe = 8
     for i, year in enumerate(foo.years):
         if i + pe - 1 >= len(foo.years):
             break
@@ -308,12 +306,3 @@ if __name__ == "__main__":
             print(year, "~", year + pe - 1)
             foo.linear_regress(i, i + pe - 1, year, year + pe - 1)
             foo.classify_pixels(i + pe - 1, year, year + pe - 1)  # save sg clf training data
-
-    # ana = SGAna(foo)
-    # ana.analyze()
-
-    # analysis.compute_sg()
-    # plt.subplots(figsize=(12, 4))
-    # for x1 in range(0, 4800, 500):
-    #     for y1 in range(0, 4800, 500):
-    #         analysis.plot_time_series_with_regression(x1, y1)
