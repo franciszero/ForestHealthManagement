@@ -101,7 +101,7 @@ class Foo:
                         print(f"skipping plot {fp}")
                     else:
                         print(f"plotting map {fp}")
-                    if self.VI_name in sds:
+                    # if self.VI_name in sds:
                         self.__plot_map(arr, dt, sds, fp)
 
                     # cache map
