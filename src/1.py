@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import os
 from datetime import datetime, timedelta
 import pandas as pd
-import seaborn as sns
 import numpy as np
 from scipy.stats import linregress
 from collections import defaultdict
@@ -11,6 +10,7 @@ from scipy.stats import t
 from matplotlib.dates import YearLocator, MonthLocator
 from matplotlib.colors import ListedColormap, Normalize
 from matplotlib.ticker import MaxNLocator
+from statsmodels.tsa.seasonal import seasonal_decompose
 
 
 class Foo:
@@ -24,7 +24,6 @@ class Foo:
         self.NDVI = np.zeros((len(self.hdf_files), self.x2 - self.x1, self.y2 - self.y1))
         self.VI_name = "NDVI"
         self.dates = []
-        self.__foo()
 
         self.r_values = None
         self.std_errs = None
@@ -39,6 +38,28 @@ class Foo:
 
         self.p_val_nan = 10
         pass
+
+    def process(self, decomp_period, lr_period):
+        self.__foo()
+
+        for x in range(0, 4800, 500):
+            for y in range(0, 4800, 500):
+                self.plot_time_series(x, y, period=decomp_period)
+
+        self.compute_sg()  # save sg values
+        fig0, ax0 = plt.subplots(figsize=(12, 4))
+        for x1 in range(0, 4800, 500):
+            for y1 in range(0, 4800, 500):
+                self.plot_time_series_with_regression(x1, y1)
+        plt.close(fig0)
+
+        for i, year in enumerate(self.years):
+            if i + lr_period - 1 >= len(self.years):
+                break
+            else:
+                print(year, "~", year + lr_period - 1)
+                self.linear_regress(i, i + lr_period - 1)
+                self.classify_pixels(i + lr_period - 1, year, year + lr_period - 1, lr_period)
 
     @staticmethod
     def __extract_date_from_filename(fn):
@@ -98,16 +119,8 @@ class Foo:
         plt.savefig(fp)
         plt.clf()
 
-    def plot_time_series(self, ax, x, y):
-        df = pd.DataFrame(index=range(len(self.dates)), columns=["dt", "ndvi", "evi"])
-        df["dt"] = self.dates
-        df['dt'] = pd.to_datetime(df['dt'])
-        df["ndvi"] = self.NDVI[:, x, y]
-        df = pd.melt(df, id_vars=['dt'], value_vars=['ndvi'], var_name='hue', value_name='val')
-
-        ax = sns.lineplot(data=df, x='dt', y='val', hue='hue')
-        ax.set_title('NDVI Time Series')
-
+    @staticmethod
+    def __set_grids(ax):
         # Setting grid, major ticks every year, minor ticks every month
         ax.xaxis.set_major_locator(YearLocator())
         ax.xaxis.set_minor_locator(MonthLocator())
@@ -117,13 +130,111 @@ class Foo:
         ax.grid(which='minor', alpha=0.4)
         ax.grid(which='major', alpha=0.8)
 
+    def __get_ts(self, x, y):
+        df = pd.DataFrame(index=range(len(self.dates)), columns=["dt", "ndvi"])
+        df["dt"] = self.dates
+        df['dt'] = pd.to_datetime(df['dt'])
+        df["ndvi"] = self.NDVI[:, x, y]
+        return df
+
+    def __plot_ax1(self, ax, dt, ts):
+        self.__set_grids(ax)
+        ax.plot(dt, ts)
+        ax.set_title('')
+        ax.set_ylabel('NDVI Time Series')
+
+    def __plot_ax2(self, ax, dt, trend):
+        self.__set_grids(ax)
+        tr = pd.DataFrame(index=range(len(dt)), columns=["dt", "trend"])
+        tr["dt"] = dt
+        tr["trend"] = trend
+        ax.plot(tr[~tr["trend"].isna()]["dt"], tr[~tr["trend"].isna()]["trend"])
+        ax.plot(tr[tr["trend"].isna()]["dt"], tr[tr["trend"].isna()]["trend"].fillna(0), alpha=0)
+        ax.set_title('')
+        ax.set_ylabel('Trend')
+
+    def __plot_ax3(self, ax, dt, seasonal):
+        self.__set_grids(ax)
+        ax.plot(dt, seasonal)
+        ax.set_title('')
+        ax.set_ylabel('Seasonal')
+
+    def __plot_ax4(self, ax, dt, resid):
+        self.__set_grids(ax)
+        markerline, stemline, baseline = ax.stem(dt, resid)
+        plt.setp(markerline, 'markerfacecolor', 'blue', 'markersize', 1.2)
+        plt.setp(stemline, 'linewidth', 0.2)
+        plt.setp(baseline, 'linewidth', 0)
+        ax.fill_between(dt, resid, 0, facecolor='C0', alpha=0.4)
+        ax.set_title('')
+        ax.set_ylabel('Residual (Stem Plot)')
+        ax.set_xlabel('Year')
+
+    def plot_time_series(self, x, y, period=12 * 4):
+        df = self.__get_ts(x, y)
+        result = seasonal_decompose(df['ndvi'], model='additive', period=period)
+        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, figsize=(10, 8))
+        fig.suptitle(f'NDVI Time Series Seasonal Decomposition {df["dt"]}')
+        self.__plot_ax1(ax1, df["dt"], df["ndvi"])
+        self.__plot_ax2(ax2, df["dt"], result.trend)
+        self.__plot_ax3(ax3, df["dt"], result.seasonal)
+        self.__plot_ax4(ax4, df["dt"], result.resid)
+
         pth = f"{self.rootpath}/time_series"
         if not os.path.exists(pth):
             os.makedirs(pth)
         fp = f"%s/%4d_%4d.png" % (pth, x, y)
         plt.savefig(fp)
         print(f"plot saved at {fp}")
-        plt.clf()
+        plt.close(fig)
+
+    # def plot_time_series(self, ax, x, y):
+    #     df = pd.DataFrame(index=range(len(self.dates)), columns=["dt", "ndvi", "evi"])
+    #     df["dt"] = self.dates
+    #     df['dt'] = pd.to_datetime(df['dt'])
+    #     df["ndvi"] = self.NDVI[:, x, y]
+    #     df = pd.melt(df, id_vars=['dt'], value_vars=['ndvi'], var_name='hue', value_name='val')
+    #
+    #     ax = sns.lineplot(data=df, x='dt', y='val', hue='hue')
+    #     ax.set_title('NDVI Time Series')
+    #
+    #     result = seasonal_decompose(df['ndvi'], model='additive', period=120)
+    #     fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, figsize=(10, 8))
+    #
+    #     ax1.plot(df["dt"], df["ndvi"])
+    #     # Setting grid, major ticks every year, minor ticks every month
+    #     ax1.xaxis.set_major_locator(YearLocator())
+    #     ax1.xaxis.set_minor_locator(MonthLocator())
+    #     ax1.tick_params(axis='both', which='minor', size=0)
+    #
+    #     ax1.grid(True, which='both', color='gray', linewidth=0.5, linestyle='--')
+    #     ax1.grid(which='minor', alpha=0.4)
+    #     ax1.grid(which='major', alpha=0.8)
+    #
+    #     ax1.plot(df["dt"], df["ndvi"])
+    #     ax1.set_title('')
+    #     ax1.set_ylabel('NDVI Time Series')
+    #
+    #     ax2.plot(df["dt"], result.trend)
+    #     ax2.set_title('')
+    #     ax2.set_ylabel('Trend')
+    #
+    #     ax3.plot(df["dt"], result.seasonal)
+    #     ax3.set_title('')
+    #     ax3.set_ylabel('Seasonal')
+    #
+    #     ax4.scatter(df["dt"], result.resid)
+    #     ax4.set_title('')
+    #     ax4.set_ylabel('Residual')
+    #     ax4.set_xlabel('Year')
+    #
+    #     pth = f"{self.rootpath}/time_series"
+    #     if not os.path.exists(pth):
+    #         os.makedirs(pth)
+    #     fp = f"%s/%4d_%4d.png" % (pth, x, y)
+    #     plt.savefig(fp)
+    #     print(f"plot saved at {fp}")
+    #     plt.clf()
 
     def compute_sg(self):
         year_sg = defaultdict(lambda: np.zeros((self.NDVI.shape[1], self.NDVI.shape[2])))
@@ -135,7 +246,7 @@ class Foo:
         self.sg_values = np.array([year_sg[y] for y in self.years])
         return
 
-    def linear_regress(self, start_idx, end_idx, start_year, end_year):
+    def linear_regress(self, start_idx, end_idx):
         yrs = self.years[start_idx: end_idx + 1]
         sgs = self.sg_values[start_idx:end_idx + 1, :, :]
 
@@ -285,24 +396,4 @@ class Foo:
 
 if __name__ == "__main__":
     foo = Foo()
-    fig0, ax0 = plt.subplots(figsize=(24, 4))
-    for x in range(0, 4800, 500):
-        for y in range(0, 4800, 500):
-            foo.plot_time_series(ax0, x, y)
-    plt.close(fig0)
-
-    foo.compute_sg()  # save sg values
-    fig0, ax0 = plt.subplots(figsize=(12, 4))
-    for x1 in range(0, 4800, 500):
-        for y1 in range(0, 4800, 500):
-            foo.plot_time_series_with_regression(x1, y1)
-    plt.close(fig0)
-
-    pe = 8
-    for i, year in enumerate(foo.years):
-        if i + pe - 1 >= len(foo.years):
-            break
-        else:
-            print(year, "~", year + pe - 1)
-            foo.linear_regress(i, i + pe - 1, year, year + pe - 1)
-            foo.classify_pixels(i + pe - 1, year, year + pe - 1)  # save sg clf training data
+    foo.process(48, 8)
