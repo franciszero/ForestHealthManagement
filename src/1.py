@@ -41,7 +41,7 @@ class Foo:
         self.p_val_nan = 10
         pass
 
-    def process(self, decomp_period, lr_period):
+    def process(self, decomp_period):
         self.__foo()
 
         for x in range(0, 4800, 500):
@@ -55,13 +55,14 @@ class Foo:
                 self.plot_time_series_with_regression(x1, y1)
         plt.close(fig0)
 
-        for i, year in enumerate(self.years):
-            if i + lr_period - 1 >= len(self.years):
-                break
-            else:
-                print(year, "~", year + lr_period - 1)
-                self.linear_regress(i, i + lr_period - 1)
-                self.classify_pixels(i + lr_period - 1, year, year + lr_period - 1, lr_period)
+        for lr_period in range(3, 14):
+            for i, year in enumerate(self.years):
+                if i + lr_period - 1 >= len(self.years):
+                    break
+                else:
+                    print(year, "~", year + lr_period - 1)
+                    self.linear_regress(i, i + lr_period - 1)
+                    self.classify_pixels(i + lr_period - 1, year, year + lr_period - 1, lr_period)
 
     @staticmethod
     def __extract_date_from_filename(fn):
@@ -184,8 +185,9 @@ class Foo:
         df = self._get_ts(x, y)
         result = seasonal_decompose(df['ndvi'], model='additive', period=period)
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, figsize=(10, 8))
+
         dt_range = "(%s ~ %s)" % (df["dt"].min().strftime("%Y-%m-%d"), df["dt"].max().strftime("%Y-%m-%d"))
-        fig.suptitle(f'NDVI Time Series Seasonal Decomposition {dt_range}')
+        fig.suptitle(f'NDVI Time Series Seasonal Decomposition {dt_range} (x:{x} y:{y})')
         self._plot_ax1(ax1, df["dt"], df["ndvi"])
         self._plot_ax2(ax2, df["dt"], result.trend)
         self._plot_ax3(ax3, df["dt"], result.seasonal)
@@ -408,4 +410,4 @@ class Foo:
 
 if __name__ == "__main__":
     foo = Foo()
-    foo.process(24, 8)
+    foo.process(24)
