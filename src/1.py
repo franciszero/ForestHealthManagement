@@ -10,9 +10,10 @@ from scipy.stats import t
 from matplotlib.dates import YearLocator, MonthLocator
 from matplotlib.colors import ListedColormap, Normalize
 from matplotlib.ticker import MaxNLocator
-from statsmodels.tsa.seasonal import seasonal_decompose
+# from statsmodels.tsa.seasonal import seasonal_decompose
 from scipy.interpolate import UnivariateSpline
 import matplotlib.dates as mdates
+from statsmodels.tsa.seasonal import STL
 
 
 class Foo:
@@ -77,6 +78,8 @@ class Foo:
         for hdf_file in self.hdf_files:
             dt = self.__extract_date_from_filename(hdf_file)
             # dt_obj = datetime.strptime(dt, '%Y-%m-%d')
+            # if dt <= '2012-07-03':
+            #     continue
             # if not dt_obj.year <= 2007:
             #     continue
             print(dt)
@@ -84,19 +87,18 @@ class Foo:
 
             hdf = SD(os.path.join(self.hdf_path, hdf_file), SDC.READ)
             for _, sds in enumerate(hdf.datasets().keys()):
-                # get dataset
-                ds = hdf.select(sds)
-
                 # check folder
-                sds = sds.replace(' ', '_')
-                pth = f"{self.rootpath}/{sds}"
+                sds1 = sds.replace(' ', '_')
+                pth = f"{self.rootpath}/{sds1}"
                 if not os.path.exists(pth):
                     os.makedirs(pth)
 
                 # check file
                 fp = f"{pth}/{dt}.png"
-                if not os.path.exists(fp) or self.VI_name in sds:
-                    print("\t%-40s" % sds, end=" ")
+                if not os.path.exists(fp) or self.VI_name in sds1:
+                    print("\t%-40s" % sds1, end=" ")
+                    # get dataset
+                    ds = hdf.select(sds)
                     arr = ds[self.x1:self.x2 + 1, self.y1:self.y2 + 1]
 
                     # plot map
@@ -104,8 +106,8 @@ class Foo:
                         print(f"skipping plot {fp}")
                     else:
                         print(f"plotting map {fp}")
-                    # if self.VI_name in sds:
-                        self.__plot_map(arr, dt, sds, fp)
+                        # if self.VI_name in sds:
+                        self.__plot_map(arr, dt, sds1, fp)
 
                     # cache map
                     self.NDVI[idx, :, :] = arr
@@ -183,7 +185,8 @@ class Foo:
 
     def plot_time_series(self, x, y, period=12 * 4):
         df = self._get_ts(x, y)
-        result = seasonal_decompose(df['ndvi'], model='additive', period=period)
+        # seasonal_decompose(df['ndvi'], model='additive', period=period)
+        result = STL(df["ndvi"], period=12*3).fit()
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, figsize=(10, 8))
 
         dt_range = "(%s ~ %s)" % (df["dt"].min().strftime("%Y-%m-%d"), df["dt"].max().strftime("%Y-%m-%d"))
