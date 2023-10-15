@@ -73,7 +73,6 @@ class Foo:
         return date.strftime('%Y-%m-%d')
 
     def __foo(self):
-        fig, ax = plt.subplots(figsize=(10, 10))
         idx = 0
         for hdf_file in self.hdf_files:
             dt = self.__extract_date_from_filename(hdf_file)
@@ -106,7 +105,7 @@ class Foo:
                         print(f"skipping plot {fp}")
                     else:
                         print(f"plotting map {fp}")
-                        # if self.VI_name in sds:
+                    # if self.VI_name in sds:
                         self.__plot_map(arr, dt, sds1, fp)
 
                     # cache map
@@ -114,15 +113,28 @@ class Foo:
             idx += 1
             hdf.end()
         self.NDVI = self.NDVI[:len(self.dates), :, :]
-        plt.close(fig)
 
     @staticmethod
     def __plot_map(arr, dt, sds, fp):
-        plt.imshow(arr, cmap='RdYlGn')
-        plt.colorbar(label=sds)
+        fig, ax = plt.subplots(figsize=(10, 10))
+        im = ax.imshow(arr, cmap='RdYlGn')
+        major_ticks = np.arange(0, arr.shape[1] + 1, 1000)
+        ax.set_xticks(major_ticks)
+        ax.set_yticks(major_ticks)
+
+        minor_ticks = np.arange(0, arr.shape[1] + 1, 200)
+        ax.set_xticks(minor_ticks, minor=True)
+        ax.set_yticks(minor_ticks, minor=True)
+        ax.tick_params(axis='both', which='minor', size=0)
+
+        ax.grid(True, which='both', color='darkblue', linewidth=0.5, linestyle='--')
+        ax.grid(which='minor', alpha=0.4)
+        ax.grid(which='major', alpha=0.8)
+
+        plt.colorbar(im, label=sds)
         plt.title(f"{sds}_{dt}")
         plt.savefig(fp)
-        plt.clf()
+        plt.close(fig)
 
     @staticmethod
     def __set_grids(ax):
@@ -147,6 +159,7 @@ class Foo:
         ax.plot(dt, ts)
         ax.set_title('')
         ax.set_ylabel('NDVI Time Series')
+        ax.set_ylim(-2000, 10000)
 
     def _plot_ax2(self, ax, dt, trend):
         self.__set_grids(ax)
@@ -157,6 +170,7 @@ class Foo:
         ax.plot(tr[tr["trend"].isna()]["dt"], tr[tr["trend"].isna()]["trend"].fillna(0), alpha=0)
         ax.set_title('')
         ax.set_ylabel('Trend')
+        ax.set_ylim(-2000, 10000)
 
     def _plot_ax3(self, ax, dt, seasonal):
         self.__set_grids(ax)
@@ -183,10 +197,10 @@ class Foo:
         ax.set_ylabel('Residual (Stem Plot)')
         ax.set_xlabel('Year')
 
-    def plot_time_series(self, x, y, period=12 * 4):
+    def plot_time_series(self, x, y, period=12 * 2):
         df = self._get_ts(x, y)
         # seasonal_decompose(df['ndvi'], model='additive', period=period)
-        result = STL(df["ndvi"], period=12*3).fit()
+        result = STL(df["ndvi"], period=period).fit()
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, figsize=(10, 8))
 
         dt_range = "(%s ~ %s)" % (df["dt"].min().strftime("%Y-%m-%d"), df["dt"].max().strftime("%Y-%m-%d"))
