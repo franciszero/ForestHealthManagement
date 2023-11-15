@@ -3,30 +3,44 @@ import matplotlib.pyplot as plt
 import os
 from datetime import datetime, timedelta
 import pandas as pd
-import numpy as np
 from scipy.stats import linregress
 from collections import defaultdict
 from scipy.stats import t
 from matplotlib.dates import YearLocator, MonthLocator
 from matplotlib.colors import ListedColormap, Normalize
 from matplotlib.ticker import MaxNLocator
-# from statsmodels.tsa.seasonal import seasonal_decompose
 from scipy.interpolate import UnivariateSpline
 import matplotlib.dates as mdates
 from statsmodels.tsa.seasonal import STL
+import h5py
+from sklearn.metrics import confusion_matrix, classification_report
+from keras.models import Sequential
+from keras.layers import LSTM, Dense
+from keras.utils import to_categorical
+from keras.callbacks import EarlyStopping
+from sklearn.utils.class_weight import compute_class_weight
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error
 
 
 class Foo:
     def __init__(self):
-        self.rootpath = './h12v04'
+        self.rootpath = '../h12v04'
         self.hdf_path = f'{self.rootpath}/data'
         self.hdf_files = sorted([f for f in os.listdir(self.hdf_path) if f.endswith('.hdf')],
                                 key=self.__extract_date_from_filename)
         self.x1, self.x2 = 0, 4800
         self.y1, self.y2 = 0, 4800
-        self.NDVI = np.zeros((len(self.hdf_files), self.x2 - self.x1, self.y2 - self.y1))
+        self.NDVI = None
+
         self.VI_name = "NDVI"
         self.dates = []
+        self.years = None
+        for hdf_file in self.hdf_files:
+            y, dt = self.__extract_date_from_filename(hdf_file)
+            # print(dt)
+            self.dates.append(dt)
 
         self.r_values = None
         self.std_errs = None
@@ -36,51 +50,175 @@ class Foo:
         self.t_stats = None
         self.slopes = None
         self.sg_values = None
-        self.years = None  # np.load('sg_years.npy')
-        self.sg_values = None  # np.load('sg_values.npy')
 
         self.p_val_nan = 10
         pass
 
-    def process(self, decomp_period):
+    def process(self, decomp_period=24):
         self.__foo()
 
-        for x in range(0, 4800, 500):
-            for y in range(0, 4800, 500):
-                self.plot_time_series(x, y, period=decomp_period)
+        # for x in range(0, 4800, 500):
+        #     for y in range(0, 4800, 500):
+        #         self.plot_time_series(x, y, period=decomp_period)
 
-        self.compute_sg()  # save sg values
-        fig0, ax0 = plt.subplots(figsize=(12, 4))
-        for x1 in range(0, 4800, 500):
-            for y1 in range(0, 4800, 500):
-                self.plot_time_series_with_regression(x1, y1)
-        plt.close(fig0)
+        self.__compute_sg_values()  # save sg values
+        # fig0, ax0 = plt.subplots(figsize=(12, 4))
+        # for x1 in range(0, 4800, 500):
+        #     for y1 in range(0, 4800, 500):
+        #         self.plot_time_series_with_regression(x1, y1)
+        # plt.close(fig0)
 
-        for lr_period in range(3, 14):
-            for i, year in enumerate(self.years):
-                if i + lr_period - 1 >= len(self.years):
-                    break
-                else:
-                    print(year, "~", year + lr_period - 1)
-                    self.linear_regress(i, i + lr_period - 1)
-                    self.classify_pixels(i + lr_period - 1, year, year + lr_period - 1, lr_period)
+        # for lr_period in range(7, 8):  # range(3, 14):
+        #     for i, year in enumerate(self.years):
+        #         if i + lr_period - 1 >= len(self.years):
+        #             break
+        #         else:
+        #             start_year, end_year = year, year + lr_period - 1
+        #             end_idx = i + lr_period - 1
+        #
+        #             print(f"Forest Health Classification with SG trend from {year} to {year + lr_period - 1}")
+        #             pth = f"{self.rootpath}/data_training"
+        #             year_range = "%s~%s" % (start_year, end_year)
+        #             if not os.path.exists(f'{pth}/sg_clf_training_data_{year_range}.npy'):
+        #                 self.linear_regress(i, i + lr_period - 1)
+        #                 year_range = self.classify_pixels(end_idx, start_year, end_year)
+        #                 self.plot_it(year_range, lr_period)
+        #             else:
+        #                 self.pixel_classes = np.load(f'{pth}/sg_clf_training_data_{year_range}.npy')
+        #
+        # start_year_idx, period = 2, 11
+        # yrs = self.years[start_year_idx:start_year_idx + period]
+        # year_range = "%s~%s" % (yrs[0], yrs[-1])
+        # #
+        # X_train, y_train, y_train_orig = self.get_Xy(start_year_idx, period, 400, 1800, 1000, 3800)
+        # # self.__plot_it(y_train_orig, year_range)
+        # X_test, y_test, y_test_orig = self.get_Xy(start_year_idx, period, 2000, 3000, 2000, 3000)
+        # # self.__plot_it(y_test_orig, year_range)
+        #
+        # #
+        # #
+        # #
+        # # i, period, h1, h2, w1, w2 = start_year_idx, period, 400, 1800, 1000, 3800
+        # # i, period, h1, h2, w1, w2 = start_year_idx, period, 2000, 3000, 2000, 3000
+        # # y = np.load(f'{self.rootpath}/data_training/sg_clf_training_data_{self.years[i]}~{self.years[i + period - 1]}.npy')
+        # # y = y[h1:h2, w1:w2]
+        # # y[y >= 2] = 2
+        # # y[(y >= -3) & (y <= 1)] = 1
+        # # y[y == -4] = 0
+        # # unique, counts = np.unique(y.flatten(), return_counts=True)
+        # # print(dict(zip(unique, counts)))
+        # # __plot_it(y, year_range)
+        # #
+        # #
+        # #
+        #
+        # # balance class weights
+        # y_integers = np.argmax(y_train, axis=1)
+        # class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_integers), y=y_integers)
+        # class_weight_dict = dict(enumerate(class_weights))
+        #
+        # # 构建模型
+        # model = Sequential()
+        # model.add(LSTM(50, input_shape=(X_train.shape[1], 1), return_sequences=True))
+        # model.add(LSTM(30, return_sequences=False))
+        # model.add(Dense(100, activation='relu'))
+        # model.add(Dense(y_train.shape[1], activation='softmax'))  # y_train.shape[1] 应该是类别的数量
+        #
+        # # 编译模型
+        # model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+        #
+        # # 添加早停以防过拟合
+        # early_stopping = EarlyStopping(monitor='val_loss', patience=3)
+        #
+        # # 训练模型，使用类别权重和早停
+        # history = model.fit(
+        #     X_train,
+        #     y_train,
+        #     validation_split=0.1,
+        #     epochs=50,
+        #     batch_size=512,
+        #     class_weight=class_weight_dict,
+        #     callbacks=[early_stopping]
+        # )
+        #
+        # # 评估模型
+        # loss, accuracy = model.evaluate(X_test, y_test)
+        # print(f"Test Loss: {loss}")
+        # print(f"Test Accuracy: {accuracy}")
+        # #
+        # y_pred = model.predict(X_test)
+        # y_pred_classes = np.argmax(y_pred, axis=1)
+        # y_test_classes = np.argmax(y_test, axis=1)
+        # cm = confusion_matrix(y_test_classes, y_pred_classes)
+        # print(cm)
+        # #
+        # print(classification_report(y_test_classes, y_pred_classes))
+
+    def lr_pred(self):
+        X_train = self.sg_values[:-2].reshape(15, -1).T
+        y_train = self.sg_values[-2].flatten()
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+
+        X_test = self.sg_values[1:-1].reshape(15, -1).T
+        y_test = self.sg_values[-1].flatten()
+        y_pred = model.predict(X_test)
+
+        predicted_image = y_pred.reshape(self.sg_values.shape[1], self.sg_values.shape[2])
+        mae = mean_absolute_error(y_test, y_pred)
+        print(f"MAE: {mae}")
+
+    def get_Xy(self, i, period, h1, h2, w1, w2):
+        X = self.sg_values[i: i + period, h1:h2, w1:w2].astype(np.int32)
+        X = X.reshape((period, -1)).T
+
+        y = np.load(
+            f'{self.rootpath}/data_training/sg_clf_training_data_{self.years[i]}~{self.years[i + period - 1]}.npy')
+        y = y[h1:h2, w1:w2]
+        y[y >= 2] = 2
+        y[(y >= -3) & (y <= 1)] = 1
+        y[y == -4] = 0
+        unique, counts = np.unique(y.flatten(), return_counts=True)
+        print("y label count:", dict(zip(unique, counts)))
+        y1 = y.reshape(-1)
+        y1 = to_categorical(y1, num_classes=np.unique(y1).size)
+
+        print("X shape:", X.shape)
+        print("y shape:", y.shape)
+        return X, y1, y
 
     @staticmethod
     def __extract_date_from_filename(fn):
         y = int(fn[9:13])
         doy = int(fn[13:16])  # day of year
         date = datetime(y, 1, 1) + timedelta(doy - 1)
-        return date.strftime('%Y-%m-%d')
+        return y, date.strftime('%Y-%m-%d')
 
     def __foo(self):
+        ndvi_h5 = f'./ndvi.h5'
+        if os.path.exists(ndvi_h5):
+            print(f"Read NDVI data from {ndvi_h5}")
+            t1 = datetime.now()
+            with h5py.File(ndvi_h5, 'r') as hf:
+                self.NDVI = hf['NDVI'][:]
+            self.print_run_time(t1)  # run time: 00:01:34
+        else:
+            print(f"Read NDVI data from {self.rootpath}")
+            t1 = datetime.now()
+            self.NDVI = np.zeros((len(self.hdf_files), self.x2 - self.x1, self.y2 - self.y1))
+            self.__read_from_SDS()
+            self.print_run_time(t1)  # run time: 00:04:25
+
+            print(f"save NDVI data into {ndvi_h5}")
+            t1 = datetime.now()
+            with h5py.File(ndvi_h5, 'w') as hf:
+                hf.create_dataset('NDVI', data=self.NDVI)
+            self.print_run_time(t1)  # run time: 00:05:14
+
+    def __read_from_SDS(self):
         idx = 0
-        for hdf_file in self.hdf_files:
-            dt = self.__extract_date_from_filename(hdf_file)
-            # dt_obj = datetime.strptime(dt, '%Y-%m-%d')
-            # if dt <= '2012-07-03':
-            #     continue
-            # if not dt_obj.year <= 2007:
-            #     continue
+        for hdf_file, dt in zip(self.hdf_files, self.dates):
+            y, dt = self.__extract_date_from_filename(hdf_file)
             print(dt)
             self.dates.append(dt)
 
@@ -101,11 +239,10 @@ class Foo:
                     arr = ds[self.x1:self.x2 + 1, self.y1:self.y2 + 1]
 
                     # plot map
-                    if os.path.exists(fp):
-                        print(f"skipping plot {fp}")
+                    if os.path.exists(fp): print(f"skipping plot {fp}")
                     else:
                         print(f"plotting map {fp}")
-                    # if self.VI_name in sds:
+                        # if self.VI_name in sds:
                         self.__plot_map(arr, dt, sds1, fp)
 
                     # cache map
@@ -267,15 +404,37 @@ class Foo:
     #     print(f"plot saved at {fp}")
     #     plt.clf()
 
-    def compute_sg(self):
+    def __compute_sg_values(self):
+        sg_h5 = f'./sg.h5'
+        if os.path.exists(sg_h5):
+            print(f"Read SG values from {sg_h5}")
+            t1 = datetime.now()
+            with h5py.File(sg_h5, 'r') as hf:
+                self.sg_values = hf['SG'][:]
+            self.years = np.load('sg_trend_yearly_range.npy')
+            self.print_run_time(t1)  # run time: 00:00:05
+        else:
+            print(f"Compute SG values")
+            t1 = datetime.now()
+            self.__compute_sg()
+            self.print_run_time(t1)  # run time: 00:00:55
+
+            print(f"Save SG values into {sg_h5}")
+            t1 = datetime.now()
+            with h5py.File(sg_h5, 'w') as hf:
+                hf.create_dataset('SG', data=self.sg_values)
+            self.print_run_time(t1)  # run time: 00:00:13
+
+    def __compute_sg(self):
         year_sg = defaultdict(lambda: np.zeros((self.NDVI.shape[1], self.NDVI.shape[2])))
         for idx, date in enumerate([datetime.strptime(s, '%Y-%m-%d') for s in self.dates]):
             if 4 <= date.month <= 6:
                 ndvi_without_water = np.where(self.NDVI[idx, :, :] == -3000, 0, self.NDVI[idx, :, :])
                 year_sg[date.year] += ndvi_without_water
         self.years = np.array(sorted(list(year_sg.keys())))
+        np.save(f'./sg_trend_yearly_range.npy', self.years)
         self.sg_values = np.array([year_sg[y] for y in self.years])
-        return
+        print(f"Collected SG Values for {len(self.years)} years.")
 
     def linear_regress(self, start_idx, end_idx):
         yrs = self.years[start_idx: end_idx + 1]
@@ -311,35 +470,8 @@ class Foo:
         self.std_errs = np.sqrt((1 - self.r_values ** 2) * np.var(self.sg_values, axis=0) / (n - 2))
         return
 
-    def classify_pixels(self, end_idx, start_year, end_year, period):
-        year_range = "%s~%s" % (start_year, end_year)
-
-        is_forest_growth = self.slopes[:, :] >= 0
-        is_forest_decline = self.slopes[:, :] < 0
-
-        # mark water region
-        p_val = np.where(self.sg_values[end_idx, :, :] == 0, self.p_val_nan, self.p_values)
-
-        self.pixel_classes = np.zeros_like(p_val, dtype=np.int8)
-
-        self.pixel_classes[is_forest_growth & (p_val > 0.0001) & (p_val <= 0.001)] = -3
-        self.pixel_classes[is_forest_decline & (p_val <= 0.001)] = 3
-
-        self.pixel_classes[is_forest_growth & (p_val > 0.001) & (p_val <= 0.01)] = -2
-        self.pixel_classes[is_forest_decline & (p_val > 0.001) & (p_val <= 0.01)] = 2
-
-        self.pixel_classes[is_forest_growth & (p_val > 0.01) & (p_val <= 0.05)] = -1
-        self.pixel_classes[is_forest_decline & (p_val > 0.01) & (p_val <= 0.05)] = 1
-
-        self.pixel_classes[p_val == self.p_val_nan] = -4
-
-        self.pixel_classes[(p_val <= 1) & (p_val > 0.05)] = 0
-
-        pth = f"{self.rootpath}/data_training"
-        if not os.path.exists(pth):
-            os.makedirs(pth)
-        np.save(f'{pth}/sg_clf_training_data_{year_range}.npy', self.pixel_classes)
-
+    @staticmethod
+    def __plot_it(y, year_range):
         fig, ax = plt.subplots(figsize=(10, 10))
         colors = ['#1E1EFF',  # Aquatic Area
                   '#EF6FFF',  # Strong Growth
@@ -352,13 +484,13 @@ class Foo:
                   '#FFFFFF']  # empty
         cmap_custom = ListedColormap(colors)
         norm = Normalize(vmin=-4.5, vmax=4.5)
-        cax = ax.imshow(self.pixel_classes, cmap=cmap_custom, norm=norm)
+        cax = ax.imshow(y, cmap=cmap_custom, norm=norm)
 
-        major_ticks = np.arange(0, self.pixel_classes.shape[1] + 1, 1000)
+        major_ticks = np.arange(0, y.shape[1] + 1, 1000)
         ax.set_xticks(major_ticks)
         ax.set_yticks(major_ticks)
 
-        minor_ticks = np.arange(0, self.pixel_classes.shape[1] + 1, 200)
+        minor_ticks = np.arange(0, y.shape[1] + 1, 200)
         ax.set_xticks(minor_ticks, minor=True)
         ax.set_yticks(minor_ticks, minor=True)
         ax.tick_params(axis='both', which='minor', size=0)
@@ -381,6 +513,10 @@ class Foo:
         cbar = fig.colorbar(cax, ticks=list(ticks_dict.keys()), orientation='vertical')
         cbar.ax.set_yticklabels(ticks_dict.values())
         ax.set_title('Forest Health Classification based on SG trend %s' % year_range)
+        return fig
+
+    def plot_it(self, period, year_range):
+        fig = self.__plot_it(self.pixel_classes, year_range)
 
         pth = f"{self.rootpath}/clf/{period}_years"
         if not os.path.exists(pth):
@@ -389,7 +525,35 @@ class Foo:
         plt.savefig(fp)
         print(f"plot saved at {fp}")
         plt.close(fig)
-        return
+
+    def classify_pixels(self, end_idx, start_year, end_year):
+        is_forest_growth = self.slopes[:, :] >= 0
+        is_forest_decline = self.slopes[:, :] < 0
+
+        # mark water region
+        p_val = np.where(self.sg_values[end_idx, :, :] == 0, self.p_val_nan, self.p_values)
+
+        self.pixel_classes = np.zeros_like(p_val, dtype=np.int8)
+
+        self.pixel_classes[is_forest_growth & (p_val <= 0.001)] = -3
+        self.pixel_classes[is_forest_decline & (p_val <= 0.001)] = 3
+
+        self.pixel_classes[is_forest_growth & (p_val > 0.001) & (p_val <= 0.01)] = -2
+        self.pixel_classes[is_forest_decline & (p_val > 0.001) & (p_val <= 0.01)] = 2
+
+        self.pixel_classes[is_forest_growth & (p_val > 0.01) & (p_val <= 0.05)] = -1
+        self.pixel_classes[is_forest_decline & (p_val > 0.01) & (p_val <= 0.05)] = 1
+
+        self.pixel_classes[p_val == self.p_val_nan] = -4
+
+        self.pixel_classes[(p_val <= 1) & (p_val > 0.05)] = 0
+
+        pth = f"{self.rootpath}/data_training"
+        if not os.path.exists(pth):
+            os.makedirs(pth)
+        year_range = "%s~%s" % (start_year, end_year)
+        np.save(f'{pth}/sg_clf_training_data_{year_range}.npy', self.pixel_classes)
+        return year_range
 
     def plot_time_series_with_regression(self, x, y):
         pth = f"{self.rootpath}/time_series"
@@ -423,6 +587,13 @@ class Foo:
         print(f"plot saved at {fp}")
         plt.clf()
         pass
+
+    @staticmethod
+    def print_run_time(start_time):
+        hours, remainder = divmod((datetime.now() - start_time).seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        print(f"run time: {hours:02}:{minutes:02}:{seconds:02}")
+        return
 
 
 if __name__ == "__main__":
