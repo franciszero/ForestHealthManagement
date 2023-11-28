@@ -86,10 +86,14 @@ class Foo:
 
         ms = ModelSelection(self.sg_values)  # test_xy=(0, 0), test_hw=(4800, 4800)
 
-        ms.train_nn(1)
-        ms.train_nn(2)
-        ms.train_nn(3)
-        ms.train_nn(4)
+        ms.train_nn(1)  # LSTM_1, Total params: 357056100 (1.33 GB)
+        ms.train_nn(6)  # LSTM_1_v1, [Adding Residual Connections], Total params: 545017536 (2.03 GB)
+        # ms.train_nn(7)  # LSTM_1_v2, [Using a ConvLSTM2D Layer], requires 4D input
+        ms.train_nn(8)  # LSTM_1_v3, [Adding Attention Mechanism], Total params: 560956211 (2.09 GB)
+        # ms.train_nn(9)  # LSTM_1_v4, [Using a Hybrid CNN-RNN with Skip Connections], Total params: 1072691232 (4.00 GB)
+        ms.train_nn(10)  # LSTM_1_v5, [Adding Spatial Dropout and More Regularization], Total params: 316939504 (1.18 GB)
+        ms.train_nn(11)  # LSTM_1_v6, [Deeper Network with Dilated Convolutions], Total params: 529166400 (1.97 GB)
+        ms.train_nn(12)  # LSTM_1_v7, [Incorporating Attention Mechanisms], Total params: 316972593 (1.18 GB)
 
         name_lr, model_lr, y_pred_lr, metrics_lr = ms.train_lr()
         name_xgb, model_xgb, y_pred_xgb, metrics_xgb = ms.train_xgb()
@@ -127,160 +131,6 @@ class Foo:
         #             else:
         #                 self.pixel_classes = np.load(f'{pth}/sg_clf_training_data_{year_range}.npy')
 
-
-    # def nn1(self):
-    #     time_steps = 14
-    #     h, w = 1000, 1000
-    #     channels = 1
-    #     weight_file = 'best_spatiotemporal_model.h5'
-    #
-    #     h1, w1 = 0, 0
-    #     h2, w2 = h1 + h, w1 + w
-    #     scaler = StandardScaler()
-    #     X_train = scaler.fit_transform(self.sg_values[0:14, h1:h2, w1:w2].reshape(time_steps, -1).T)
-    #     X_train = X_train.reshape(-1, time_steps, h, w, channels)
-    #     y_train = self.sg_values[14, h1:h2, w1:w2].reshape(1, -1)
-    #
-    #     h1, w1 = 1000, 1000
-    #     h2, w2 = h1 + h, w1 + w
-    #     X_val = scaler.transform(self.sg_values[1:15, h1:h2, w1:w2].reshape(time_steps, -1).T)
-    #     X_val = X_val.reshape(-1, time_steps, h, w, channels)
-    #     y_val = self.sg_values[15, h1:h2, w1:w2].reshape(1, -1)
-    #
-    #     h1, w1 = 2000, 2000
-    #     h2, w2 = h1 + h, w1 + w
-    #     X_test = scaler.transform(self.sg_values[2:16, h1:h2, w1:w2].reshape(time_steps, -1).T)
-    #     X_test = X_test.reshape(-1, time_steps, h, w, channels)
-    #     y_test = self.sg_values[16, h1:h2, w1:w2].reshape(1, -1)
-    #
-    #     print("X_train.shape = ", X_train.shape)
-    #     print("y_train.shape = ", y_train.shape)
-    #     print("X_val.shape = ", X_val.shape)
-    #     print("y_val.shape = ", y_val.shape)
-    #     print("X_test.shape = ", X_test.shape)
-    #     print("y_test.shape = ", y_test.shape)
-    #
-    #     # # balance
-    #     # plt.figure(figsize=(12, 6))
-    #     # plt.subplot(1, 2, 1)
-    #     # plt.hist(y_train.flatten(), bins=50, color='blue', alpha=0.7)
-    #     # plt.title('Train Data Distribution')
-    #     # plt.subplot(1, 2, 2)
-    #     # plt.hist(y_test.flatten(), bins=50, color='green', alpha=0.7)
-    #     # plt.title('Test Data Distribution')
-    #     # plt.show()
-    #
-    #     '''
-    #     model = Sequential()
-    #     model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu'), input_shape=(time_steps, height, width, channels)))
-    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-    #     model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu')))
-    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-    #     model.add(TimeDistributed(Flatten()))
-    #     model.add(LSTM(units=32, activation='relu'))
-    #     model.add(Dropout(0.5))
-    #     model.add(Dense(units=50, activation='relu'))
-    #     model.add(Dense(units=height * width, activation='linear'))
-    #     opt = Adam(learning_rate=0.001)
-    #     model.compile(optimizer=opt, loss='mean_squared_error')
-    #     model.summary()
-    #     '''
-    #     '''
-    #     # 定义模型
-    #     model = Sequential()
-    #     model.add(TimeDistributed(Conv2D(filters=8, kernel_size=(3, 3), activation='relu', kernel_regularizer=l2(0.001)), input_shape=(time_steps, height, width, channels)))
-    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-    #     model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu', kernel_regularizer=l2(0.001))))
-    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-    #     model.add(TimeDistributed(GlobalAveragePooling2D()))
-    #     # model.add(TimeDistributed(Flatten()))
-    #     model.add(LSTM(units=16, activation='relu', kernel_regularizer=l2(0.001)))
-    #     model.add(Dropout(0.5))
-    #     model.add(Dense(units=32, activation='relu', kernel_regularizer=l2(0.001)))
-    #     model.add(Dense(units=height * width, activation='linear'))
-    #     optimizer = Adam()
-    #     model.compile(optimizer=optimizer, loss='mean_squared_error')
-    #     model.summary()
-    #     # ----------------------------
-    #     # Mean Absolute Error (MAE): 7246.1902
-    #     # Mean Squared Error (MSE): 167638818.1418
-    #     # Root Mean Squared Error (RMSE): 7246.1902
-    #     # R-Squared (R2): nan
-    #     # ----------------------------
-    #     '''
-    #     model = Sequential()
-    #     # spacial
-    #     model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), kernel_regularizer=l2(0.001)), input_shape=(time_steps, h, w, channels)))
-    #     model.add(TimeDistributed(BatchNormalization()))
-    #     model.add(TimeDistributed(Activation('relu')))
-    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-    #
-    #     model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), kernel_regularizer=l2(0.001))))
-    #     model.add(TimeDistributed(BatchNormalization()))
-    #     model.add(TimeDistributed(Activation('relu')))
-    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-    #
-    #     model.add(TimeDistributed(Flatten()))
-    #
-    #     # temporal
-    #     model.add(LSTM(units=20, activation='relu', kernel_regularizer=l2(0.001), return_sequences=False))
-    #     model.add(Dropout(0.5))
-    #     # model.add(BatchNormalization())
-    #     # output
-    #     model.add(Dense(units=h * w, activation='linear'))
-    #     # optimizer
-    #     model.compile(optimizer=Adam(), loss='mean_squared_error')
-    #     model.summary()
-    #
-    #     # early stop & check point
-    #     callbacks = [
-    #         EarlyStopping(monitor='val_loss', patience=15),
-    #         ModelCheckpoint(weight_file, save_best_only=True)
-    #     ]
-    #
-    #     # training
-    #     history = model.fit(
-    #         X_train, y_train,
-    #         epochs=300,
-    #         batch_size=1024,
-    #         validation_data=(X_val, y_val),
-    #         verbose=2,
-    #         callbacks=callbacks
-    #     )
-    #
-    #     # load weights
-    #     model.load_weights(weight_file)
-    #     loss = model.evaluate(X_test, y_test)
-    #     print(f"Test Loss: {loss}")
-    #
-    #     '''
-    #     # performance
-    #     plt.figure(figsize=(10, 4))
-    #     plt.plot(history.history['loss'], label='Train Loss')
-    #     plt.plot(history.history['val_loss'], label='Validation Loss')
-    #     plt.title('Model Performance')
-    #     plt.ylabel('Loss')
-    #     plt.xlabel('Epoch')
-    #     plt.legend()
-    #     plt.show()
-    #     '''
-    #
-    #     # Predict and evaluate
-    #     y_pred = model.predict(X_test)
-    #     mae = mean_absolute_error(y_test, y_pred)
-    #     mse = mean_squared_error(y_test, y_pred)
-    #     rmse = mean_squared_error(y_test, y_pred, squared=False)
-    #     r2 = r2_score(y_test, y_pred)
-    #
-    #     # Print evaluation metrics
-    #     print("LSTM Model Evaluation Metrics:")
-    #     print("----------------------------")
-    #     print(f"Mean Absolute Error (MAE): {mae:.4f}")
-    #     print(f"Mean Squared Error (MSE): {mse:.4f}")
-    #     print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
-    #     print(f"R-Squared (R2): {r2:.4f}")
-    #     print("----------------------------")
-
     def model_training(self, model, time_steps=14, h1=0, w1=0, h=1000, w=1000):
         h2, w2 = h1 + h, w1 + w
         scaler = StandardScaler()
@@ -289,7 +139,8 @@ class Foo:
         model.fit(X_train, y_train)
         return scaler, model
 
-    def model_val(self, y_pred, y_test):
+    @staticmethod
+    def model_val(y_pred, y_test):
         # Metrics
         mae = mean_absolute_error(y_test, y_pred)
         mse = mean_squared_error(y_test, y_pred)

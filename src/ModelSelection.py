@@ -1,4 +1,5 @@
-from keras.src.layers import Activation
+from keras import Input, Model
+from keras.src.layers import Activation, Add, Concatenate, SpatialDropout2D
 from pyhdf.SD import SD, SDC
 import h5py
 import matplotlib.pyplot as plt
@@ -39,6 +40,10 @@ from keras.optimizers.legacy import Adam
 from keras.regularizers import l2
 from keras.layers import BatchNormalization, LeakyReLU, ReLU
 from keras.src.optimizers import RMSprop
+from keras_self_attention import SeqSelfAttention
+from keras.layers import Multiply, Permute, Reshape, Lambda, RepeatVector
+from keras.backend import sum as Ksum
+from keras import backend as K
 
 from src.ForestHealthClassification import ForestHealthClassification
 
@@ -92,7 +97,7 @@ class ModelSelection:
     def train_nn(self, idx):
         h, w = self.train_hw
 
-        if idx in (1, 2, 3):
+        if idx in (1, 2, 3, 6, 7, 8, 9, 10, 11, 12):
             X_train, X_val, X_test, y_train, y_val, y_test = self.train_test_gen1(h, w)
             if idx == 1:
                 name, weight_file, model = self.nn1(h, w)
@@ -100,12 +105,26 @@ class ModelSelection:
                 name, weight_file, model = self.nn2(h, w)
             elif idx == 3:
                 name, weight_file, model = self.nn3(h, w)
+            elif idx == 6:
+                name, weight_file, model = self.nn1_v1(h, w)
+            elif idx == 7:
+                name, weight_file, model = self.nn1_v2(h, w)
+            elif idx == 8:
+                name, weight_file, model = self.nn1_v3(h, w)
+            elif idx == 9:
+                name, weight_file, model = self.nn1_v4(h, w)
+            elif idx == 10:
+                name, weight_file, model = self.nn1_v5(h, w)
+            elif idx == 11:
+                name, weight_file, model = self.nn1_v6(h, w)
+            elif idx == 12:
+                name, weight_file, model = self.nn1_v7(h, w)
             else:
                 return
         elif idx in (4, 5):
             X_train, X_val, X_test, y_train, y_val, y_test = self.train_test_gen2(h, w)
             if idx == 4:
-                name, weight_file, model = self.nn4(h, w)
+                name, weight_file, model = self.nn_t1(h, w)
             else:
                 return
         else:
@@ -113,15 +132,15 @@ class ModelSelection:
 
         # early stop & check point
         callbacks = [
-            EarlyStopping(monitor='val_loss', patience=15),
+            EarlyStopping(monitor='val_loss', patience=50),
             ModelCheckpoint(weight_file, save_best_only=True)
         ]
 
         # training
         history = model.fit(
             X_train, y_train,
-            epochs=300,
-            batch_size=64,
+            epochs=600,
+            batch_size=2,
             validation_data=(X_val, y_val),
             verbose=2,
             callbacks=callbacks
@@ -189,6 +208,222 @@ class ModelSelection:
 
         return X_train, X_val, X_test, y_train, y_val, y_test
 
+    def nn1_v7(self, h, w):
+        name = "LSTM_1_v7"
+        weight_file = 'best_LSTM_model_1_v7.h5'
+
+        # Define the input layer
+        input_layer = Input(shape=(self.time_steps, h, w, 1))
+
+        # Spatial feature extraction
+        x = TimeDistributed(Conv2D(filters=32, kernel_size=(3, 3), activation='relu'))(input_layer)
+        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
+        x = TimeDistributed(Conv2D(filters=64, kernel_size=(3, 3), activation='relu'))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
+        x = TimeDistributed(Flatten())(x)
+
+        # Temporal feature extraction with LSTM
+        lstm_out = LSTM(units=64, return_sequences=True)(x)
+
+        # Attention mechanism
+        attention = TimeDistributed(Dense(1, activation='tanh'))(lstm_out)
+        attention = Permute((2, 1))(attention)
+        attention = Lambda(lambda x: K.sum(x, axis=-1), name='attention_vector')(attention)
+        attention = RepeatVector(64)(attention)
+        attention = Permute((2, 1))(attention)
+
+        # Applying the attention vector
+        x = Multiply()([lstm_out, attention])
+        x = LSTM(units=64, return_sequences=False)(x)
+        x = Dropout(0.5)(x)
+
+        # Output layer
+        output_layer = Dense(units=h * w, activation='linear')(x)
+
+        # Create and compile the model
+        model = Model(inputs=input_layer, outputs=output_layer, name=name)
+        model.compile(optimizer=Adam(lr=0.0001), loss='mean_squared_error')
+        model.summary()
+
+        return name, weight_file, model
+
+    def nn1_v6(self, h, w):
+        name = "LSTM_1_v6"
+        weight_file = 'best_LSTM_model_1_v6.h5'
+
+        model = Sequential(name=name)
+        # Spatial feature extraction
+        model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), dilation_rate=1, activation='relu'),
+                                  input_shape=(self.time_steps, h, w, 1)))
+        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+
+        model.add(TimeDistributed(Conv2D(filters=32, kernel_size=(3, 3), dilation_rate=2, activation='relu')))
+        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+
+        model.add(TimeDistributed(Conv2D(filters=64, kernel_size=(3, 3), dilation_rate=4, activation='relu')))
+        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+
+        model.add(TimeDistributed(Flatten()))
+
+        # Temporal feature extraction
+        model.add(LSTM(units=128, activation='relu', return_sequences=True))
+        model.add(LSTM(units=64, activation='relu', return_sequences=False))
+        model.add(Dropout(0.5))
+
+        # Output layer
+        model.add(Dense(units=h * w, activation='linear'))
+
+        # Compile model
+        model.compile(optimizer='adam', loss='mean_squared_error')
+        model.summary()
+
+        return name, weight_file, model
+
+    def nn1_v5(self, h, w):
+        name = "LSTM_1_v5"
+        weight_file = 'best_LSTM_model_1_v5.h5'
+
+        model = Sequential(name=name)
+        # Spatial feature extraction
+        model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu',
+                                         kernel_regularizer=l2(0.01)), input_shape=(self.time_steps, h, w, 1)))
+        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+        model.add(TimeDistributed(SpatialDropout2D(0.2)))
+
+        model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu',
+                                         kernel_regularizer=l2(0.01))))
+        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+        model.add(TimeDistributed(SpatialDropout2D(0.2)))
+
+        model.add(TimeDistributed(Flatten()))
+
+        # Temporal feature extraction
+        model.add(LSTM(units=64, activation='relu', kernel_regularizer=l2(0.01), return_sequences=False))
+        model.add(Dropout(0.5))
+
+        # Output layer
+        model.add(Dense(units=h * w, activation='linear'))
+
+        # Compile model
+        model.compile(optimizer=Adam(lr=0.0001), loss='mean_squared_error')
+        model.summary()
+
+        return name, weight_file, model
+
+    def nn1_v4(self, h, w):
+        name = "LSTM_1_v4"
+        weight_file = 'best_LSTM_model_1_v4.h5'
+
+        # Define input layer
+        input_layer = Input(shape=(self.time_steps, h, w, 1))
+
+        # CNN block
+        conv1 = TimeDistributed(Conv2D(filters=8, kernel_size=(3, 3), activation='relu'))(input_layer)
+        pool1 = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(conv1)
+        conv2 = TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu'))(pool1)
+        pool2 = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(conv2)
+        flat_conv_out = TimeDistributed(Flatten())(pool2)
+
+        # RNN block
+        rnn_out = LSTM(units=32, return_sequences=True)(flat_conv_out)
+        rnn_out = LSTM(units=16)(rnn_out)
+
+        # Combine CNN and RNN outputs
+        combined = Concatenate()([Flatten()(flat_conv_out), rnn_out])
+
+        # Dense layers
+        dense_out = Dropout(0.5)(combined)
+        dense_out = Dense(units=64, activation='relu')(dense_out)
+        output_layer = Dense(units=h * w, activation='linear')(dense_out)
+
+        # Create the model
+        model = Model(inputs=input_layer, outputs=output_layer, name=name)
+        model.compile(optimizer='adam', loss='mean_squared_error')
+        model.summary()
+
+        return name, weight_file, model
+
+    def nn1_v3(self, h, w):
+        name = "LSTM_1_v3"
+        weight_file = 'best_LSTM_model_1_v3.h5'
+
+        model = Sequential(name=name)
+        model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu'),
+                                  input_shape=(self.time_steps, h, w, 1)))
+        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+        model.add(TimeDistributed(Flatten()))
+
+        # Attention Mechanism
+        model.add(SeqSelfAttention(attention_activation='sigmoid'))
+        model.add(LSTM(units=32, activation='relu'))
+        model.add(Dropout(0.5))
+        model.add(Dense(units=50, activation='relu'))
+        model.add(Dense(units=h * w, activation='linear'))
+
+        model.compile(optimizer='adam', loss='mean_squared_error')
+        model.summary()
+
+        return name, weight_file, model
+
+    def nn1_v2(self, h, w):
+        name = "LSTM_1_v2"
+        weight_file = 'best_LSTM_model_1_v2.h5'
+
+        model = Sequential(name=name)
+        model.add(ConvLSTM2D(filters=8, kernel_size=(3, 3),  # Reduced filters
+                             padding='same', return_sequences=True,
+                             input_shape=(self.time_steps, h, w, 1)))
+        model.add(BatchNormalization())
+        model.add(Activation('relu'))  # Activation after batch normalization
+        model.add(ConvLSTM2D(filters=8, kernel_size=(3, 3),  # Reduced filters
+                             padding='same', return_sequences=False))
+        model.add(BatchNormalization())
+        model.add(Activation('relu'))  # Activation after batch normalization
+        model.add(Flatten())
+        model.add(Dense(units=50, activation='relu'))  # Reduced units
+        model.add(Dropout(0.5))
+        model.add(Dense(units=h * w, activation='linear'))
+
+        model.compile(optimizer='adam', loss='mean_squared_error')
+        model.summary()
+
+        return name, weight_file, model
+
+    def nn1_v1(self, h, w):
+        name = "LSTM_1_v1"
+        weight_file = 'best_LSTM_model_1_v1.h5'
+
+        input_layer = Input(shape=(self.time_steps, h, w, 1))
+
+        # First block
+        x = TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), padding='same'))(input_layer)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
+
+        # Second block with residual connection
+        previous_block_activation = x
+        x = TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), padding='same'))(x)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), padding='same'))(x)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = Add()([x, previous_block_activation])
+
+        x = TimeDistributed(Flatten())(x)
+        x = LSTM(units=32, activation='relu', return_sequences=True)(x)
+        x = Dropout(0.5)(x)
+        x = LSTM(units=32, activation='relu')(x)
+        x = Dropout(0.5)(x)
+        output = Dense(units=h * w, activation='linear')(x)
+
+        model = Model(inputs=input_layer, outputs=output, name=name)
+        model.compile(optimizer='adam', loss='mean_squared_error')
+        model.summary()
+
+        return name, weight_file, model
+
     def nn3(self, h, w):
         name = "LSTM_3"
         weight_file = 'best_LSTM_model_3.h5'
@@ -246,18 +481,18 @@ class ModelSelection:
         weight_file = 'best_LSTM_model_1_improved.h5'
 
         model = Sequential()
-        model.add(TimeDistributed(Conv2D(filters=32, kernel_size=(3, 3), padding='same'),
+        model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), padding='same'),
                                   input_shape=(self.time_steps, h, w, 1)))
         model.add(TimeDistributed(BatchNormalization()))
         model.add(TimeDistributed(Activation('relu')))
         model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
 
-        model.add(TimeDistributed(Conv2D(filters=64, kernel_size=(3, 3), padding='same')))
+        model.add(TimeDistributed(Conv2D(filters=32, kernel_size=(3, 3), padding='same')))
         model.add(TimeDistributed(BatchNormalization()))
         model.add(TimeDistributed(Activation('relu')))
         model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
 
-        model.add(TimeDistributed(Conv2D(filters=128, kernel_size=(3, 3), padding='same')))
+        model.add(TimeDistributed(Conv2D(filters=64, kernel_size=(3, 3), padding='same')))
         model.add(TimeDistributed(BatchNormalization()))
         model.add(TimeDistributed(Activation('relu')))
         model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
@@ -298,9 +533,9 @@ class ModelSelection:
 
         return X_train, X_val, X_test, y_train, y_val, y_test
 
-    def nn4(self, h, w):
-        name = "LSTM_4"
-        weight_file = 'best_LSTM_model_4.h5'
+    def nn_t1(self, h, w):
+        name = "LSTM_T1"
+        weight_file = 'best_LSTM_model_T1.h5'
 
         model = Sequential()
         model.add(LSTM(units=50, activation='relu', input_shape=(self.time_steps, h * w), return_sequences=True))
