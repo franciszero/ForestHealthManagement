@@ -1,27 +1,43 @@
+from keras.src.layers import Activation
 from pyhdf.SD import SD, SDC
+import h5py
 import matplotlib.pyplot as plt
 import os
-from datetime import datetime, timedelta
-import pandas as pd
-from scipy.stats import linregress
 from collections import defaultdict
-from scipy.stats import t
+from datetime import datetime, timedelta
+import numpy as np
+import pandas as pd
+import matplotlib.dates as mdates
 from matplotlib.dates import YearLocator, MonthLocator
 from matplotlib.colors import ListedColormap, Normalize
 from matplotlib.ticker import MaxNLocator
+from scipy.stats import linregress
+from scipy.stats import t
 from scipy.interpolate import UnivariateSpline
-import matplotlib.dates as mdates
+from sklearn.linear_model import LinearRegression, Lasso, Ridge
+from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor, VotingRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, confusion_matrix, classification_report
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.utils import compute_class_weight
 from statsmodels.tsa.seasonal import STL
-import h5py
-from sklearn.metrics import confusion_matrix, classification_report
-from keras.models import Sequential
-from keras.layers import LSTM, Dense
 from keras.utils import to_categorical
-from keras.callbacks import EarlyStopping
-from sklearn.utils.class_weight import compute_class_weight
-import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error
+from keras.src.callbacks import EarlyStopping
+import xgboost as xgb
+from keras.models import Sequential
+import tensorflow as tf
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.layers import ConvLSTM2D, Dense, Flatten, TimeDistributed, LSTM, Conv1D, Conv2D, MaxPooling2D, \
+    GlobalAveragePooling2D, Dropout
+from keras.optimizers.legacy import Adam
+from keras.regularizers import l2
+from keras.layers import BatchNormalization, LeakyReLU, ReLU
+from keras.src.optimizers import RMSprop
+
+from src.ForestHealthClassification import ForestHealthClassification
+from src.ModelSelection import ModelSelection
 
 
 class Foo:
@@ -55,7 +71,7 @@ class Foo:
         pass
 
     def process(self, decomp_period=24):
-        self.__foo()
+        # self.__foo()
 
         # for x in range(0, 4800, 500):
         #     for y in range(0, 4800, 500):
@@ -67,6 +83,31 @@ class Foo:
         #     for y1 in range(0, 4800, 500):
         #         self.plot_time_series_with_regression(x1, y1)
         # plt.close(fig0)
+
+        ms = ModelSelection(self.sg_values)  # test_xy=(0, 0), test_hw=(4800, 4800)
+
+        ms.train_nn(1)
+        ms.train_nn(2)
+        ms.train_nn(3)
+        ms.train_nn(4)
+
+        name_lr, model_lr, y_pred_lr, metrics_lr = ms.train_lr()
+        name_xgb, model_xgb, y_pred_xgb, metrics_xgb = ms.train_xgb()
+        # name_rf, model_rf, y_pred_rf, metrics_rf = ms.train_rf()
+        name_dt, model_dt, y_pred_dt, metrics_dt = ms.train_dt()
+        # name_svr, model_svr, y_pred_svr, metrics_svr = ms.train_svr()
+        name_en, model_en, y_pred_en, metrics_en = ms.train_ensemble_model([(name_lr, model_lr),
+                                                                            (name_xgb, model_xgb),
+                                                                            # (name_rf, model_rf),
+                                                                            (name_dt, model_dt),
+                                                                            # (name_svr, model_svr)
+                                                                            ])
+
+        '''
+        把计算线性回归的部分，和像素分类的部分，写到一个新的 class 里
+        可视化对比 map fact 森林健康染色图，和预测森林健康染色图
+        做 confuse matrix 的 heatmap，看每个模型在森林健康/不健康上的预测准确率
+        '''
 
         # for lr_period in range(7, 8):  # range(3, 14):
         #     for i, year in enumerate(self.years):
@@ -85,107 +126,191 @@ class Foo:
         #                 self.plot_it(year_range, lr_period)
         #             else:
         #                 self.pixel_classes = np.load(f'{pth}/sg_clf_training_data_{year_range}.npy')
-        #
-        # start_year_idx, period = 2, 11
-        # yrs = self.years[start_year_idx:start_year_idx + period]
-        # year_range = "%s~%s" % (yrs[0], yrs[-1])
-        # #
-        # X_train, y_train, y_train_orig = self.get_Xy(start_year_idx, period, 400, 1800, 1000, 3800)
-        # # self.__plot_it(y_train_orig, year_range)
-        # X_test, y_test, y_test_orig = self.get_Xy(start_year_idx, period, 2000, 3000, 2000, 3000)
-        # # self.__plot_it(y_test_orig, year_range)
-        #
-        # #
-        # #
-        # #
-        # # i, period, h1, h2, w1, w2 = start_year_idx, period, 400, 1800, 1000, 3800
-        # # i, period, h1, h2, w1, w2 = start_year_idx, period, 2000, 3000, 2000, 3000
-        # # y = np.load(f'{self.rootpath}/data_training/sg_clf_training_data_{self.years[i]}~{self.years[i + period - 1]}.npy')
-        # # y = y[h1:h2, w1:w2]
-        # # y[y >= 2] = 2
-        # # y[(y >= -3) & (y <= 1)] = 1
-        # # y[y == -4] = 0
-        # # unique, counts = np.unique(y.flatten(), return_counts=True)
-        # # print(dict(zip(unique, counts)))
-        # # __plot_it(y, year_range)
-        # #
-        # #
-        # #
-        #
-        # # balance class weights
-        # y_integers = np.argmax(y_train, axis=1)
-        # class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_integers), y=y_integers)
-        # class_weight_dict = dict(enumerate(class_weights))
-        #
-        # # 构建模型
-        # model = Sequential()
-        # model.add(LSTM(50, input_shape=(X_train.shape[1], 1), return_sequences=True))
-        # model.add(LSTM(30, return_sequences=False))
-        # model.add(Dense(100, activation='relu'))
-        # model.add(Dense(y_train.shape[1], activation='softmax'))  # y_train.shape[1] 应该是类别的数量
-        #
-        # # 编译模型
-        # model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-        #
-        # # 添加早停以防过拟合
-        # early_stopping = EarlyStopping(monitor='val_loss', patience=3)
-        #
-        # # 训练模型，使用类别权重和早停
-        # history = model.fit(
-        #     X_train,
-        #     y_train,
-        #     validation_split=0.1,
-        #     epochs=50,
-        #     batch_size=512,
-        #     class_weight=class_weight_dict,
-        #     callbacks=[early_stopping]
-        # )
-        #
-        # # 评估模型
-        # loss, accuracy = model.evaluate(X_test, y_test)
-        # print(f"Test Loss: {loss}")
-        # print(f"Test Accuracy: {accuracy}")
-        # #
-        # y_pred = model.predict(X_test)
-        # y_pred_classes = np.argmax(y_pred, axis=1)
-        # y_test_classes = np.argmax(y_test, axis=1)
-        # cm = confusion_matrix(y_test_classes, y_pred_classes)
-        # print(cm)
-        # #
-        # print(classification_report(y_test_classes, y_pred_classes))
 
-    def lr_pred(self):
-        X_train = self.sg_values[:-2].reshape(15, -1).T
-        y_train = self.sg_values[-2].flatten()
-        model = LinearRegression()
+
+    # def nn1(self):
+    #     time_steps = 14
+    #     h, w = 1000, 1000
+    #     channels = 1
+    #     weight_file = 'best_spatiotemporal_model.h5'
+    #
+    #     h1, w1 = 0, 0
+    #     h2, w2 = h1 + h, w1 + w
+    #     scaler = StandardScaler()
+    #     X_train = scaler.fit_transform(self.sg_values[0:14, h1:h2, w1:w2].reshape(time_steps, -1).T)
+    #     X_train = X_train.reshape(-1, time_steps, h, w, channels)
+    #     y_train = self.sg_values[14, h1:h2, w1:w2].reshape(1, -1)
+    #
+    #     h1, w1 = 1000, 1000
+    #     h2, w2 = h1 + h, w1 + w
+    #     X_val = scaler.transform(self.sg_values[1:15, h1:h2, w1:w2].reshape(time_steps, -1).T)
+    #     X_val = X_val.reshape(-1, time_steps, h, w, channels)
+    #     y_val = self.sg_values[15, h1:h2, w1:w2].reshape(1, -1)
+    #
+    #     h1, w1 = 2000, 2000
+    #     h2, w2 = h1 + h, w1 + w
+    #     X_test = scaler.transform(self.sg_values[2:16, h1:h2, w1:w2].reshape(time_steps, -1).T)
+    #     X_test = X_test.reshape(-1, time_steps, h, w, channels)
+    #     y_test = self.sg_values[16, h1:h2, w1:w2].reshape(1, -1)
+    #
+    #     print("X_train.shape = ", X_train.shape)
+    #     print("y_train.shape = ", y_train.shape)
+    #     print("X_val.shape = ", X_val.shape)
+    #     print("y_val.shape = ", y_val.shape)
+    #     print("X_test.shape = ", X_test.shape)
+    #     print("y_test.shape = ", y_test.shape)
+    #
+    #     # # balance
+    #     # plt.figure(figsize=(12, 6))
+    #     # plt.subplot(1, 2, 1)
+    #     # plt.hist(y_train.flatten(), bins=50, color='blue', alpha=0.7)
+    #     # plt.title('Train Data Distribution')
+    #     # plt.subplot(1, 2, 2)
+    #     # plt.hist(y_test.flatten(), bins=50, color='green', alpha=0.7)
+    #     # plt.title('Test Data Distribution')
+    #     # plt.show()
+    #
+    #     '''
+    #     model = Sequential()
+    #     model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu'), input_shape=(time_steps, height, width, channels)))
+    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+    #     model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu')))
+    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+    #     model.add(TimeDistributed(Flatten()))
+    #     model.add(LSTM(units=32, activation='relu'))
+    #     model.add(Dropout(0.5))
+    #     model.add(Dense(units=50, activation='relu'))
+    #     model.add(Dense(units=height * width, activation='linear'))
+    #     opt = Adam(learning_rate=0.001)
+    #     model.compile(optimizer=opt, loss='mean_squared_error')
+    #     model.summary()
+    #     '''
+    #     '''
+    #     # 定义模型
+    #     model = Sequential()
+    #     model.add(TimeDistributed(Conv2D(filters=8, kernel_size=(3, 3), activation='relu', kernel_regularizer=l2(0.001)), input_shape=(time_steps, height, width, channels)))
+    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+    #     model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu', kernel_regularizer=l2(0.001))))
+    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+    #     model.add(TimeDistributed(GlobalAveragePooling2D()))
+    #     # model.add(TimeDistributed(Flatten()))
+    #     model.add(LSTM(units=16, activation='relu', kernel_regularizer=l2(0.001)))
+    #     model.add(Dropout(0.5))
+    #     model.add(Dense(units=32, activation='relu', kernel_regularizer=l2(0.001)))
+    #     model.add(Dense(units=height * width, activation='linear'))
+    #     optimizer = Adam()
+    #     model.compile(optimizer=optimizer, loss='mean_squared_error')
+    #     model.summary()
+    #     # ----------------------------
+    #     # Mean Absolute Error (MAE): 7246.1902
+    #     # Mean Squared Error (MSE): 167638818.1418
+    #     # Root Mean Squared Error (RMSE): 7246.1902
+    #     # R-Squared (R2): nan
+    #     # ----------------------------
+    #     '''
+    #     model = Sequential()
+    #     # spacial
+    #     model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), kernel_regularizer=l2(0.001)), input_shape=(time_steps, h, w, channels)))
+    #     model.add(TimeDistributed(BatchNormalization()))
+    #     model.add(TimeDistributed(Activation('relu')))
+    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+    #
+    #     model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), kernel_regularizer=l2(0.001))))
+    #     model.add(TimeDistributed(BatchNormalization()))
+    #     model.add(TimeDistributed(Activation('relu')))
+    #     model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+    #
+    #     model.add(TimeDistributed(Flatten()))
+    #
+    #     # temporal
+    #     model.add(LSTM(units=20, activation='relu', kernel_regularizer=l2(0.001), return_sequences=False))
+    #     model.add(Dropout(0.5))
+    #     # model.add(BatchNormalization())
+    #     # output
+    #     model.add(Dense(units=h * w, activation='linear'))
+    #     # optimizer
+    #     model.compile(optimizer=Adam(), loss='mean_squared_error')
+    #     model.summary()
+    #
+    #     # early stop & check point
+    #     callbacks = [
+    #         EarlyStopping(monitor='val_loss', patience=15),
+    #         ModelCheckpoint(weight_file, save_best_only=True)
+    #     ]
+    #
+    #     # training
+    #     history = model.fit(
+    #         X_train, y_train,
+    #         epochs=300,
+    #         batch_size=1024,
+    #         validation_data=(X_val, y_val),
+    #         verbose=2,
+    #         callbacks=callbacks
+    #     )
+    #
+    #     # load weights
+    #     model.load_weights(weight_file)
+    #     loss = model.evaluate(X_test, y_test)
+    #     print(f"Test Loss: {loss}")
+    #
+    #     '''
+    #     # performance
+    #     plt.figure(figsize=(10, 4))
+    #     plt.plot(history.history['loss'], label='Train Loss')
+    #     plt.plot(history.history['val_loss'], label='Validation Loss')
+    #     plt.title('Model Performance')
+    #     plt.ylabel('Loss')
+    #     plt.xlabel('Epoch')
+    #     plt.legend()
+    #     plt.show()
+    #     '''
+    #
+    #     # Predict and evaluate
+    #     y_pred = model.predict(X_test)
+    #     mae = mean_absolute_error(y_test, y_pred)
+    #     mse = mean_squared_error(y_test, y_pred)
+    #     rmse = mean_squared_error(y_test, y_pred, squared=False)
+    #     r2 = r2_score(y_test, y_pred)
+    #
+    #     # Print evaluation metrics
+    #     print("LSTM Model Evaluation Metrics:")
+    #     print("----------------------------")
+    #     print(f"Mean Absolute Error (MAE): {mae:.4f}")
+    #     print(f"Mean Squared Error (MSE): {mse:.4f}")
+    #     print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
+    #     print(f"R-Squared (R2): {r2:.4f}")
+    #     print("----------------------------")
+
+    def model_training(self, model, time_steps=14, h1=0, w1=0, h=1000, w=1000):
+        h2, w2 = h1 + h, w1 + w
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(self.sg_values[0:14, h1:h2, w1:w2].reshape(time_steps, -1).T)
+        y_train = self.sg_values[14, h1:h2, w1:w2].flatten()
         model.fit(X_train, y_train)
+        return scaler, model
 
-        X_test = self.sg_values[1:-1].reshape(15, -1).T
-        y_test = self.sg_values[-1].flatten()
-        y_pred = model.predict(X_test)
-
-        predicted_image = y_pred.reshape(self.sg_values.shape[1], self.sg_values.shape[2])
+    def model_val(self, y_pred, y_test):
+        # Metrics
         mae = mean_absolute_error(y_test, y_pred)
-        print(f"MAE: {mae}")
+        mse = mean_squared_error(y_test, y_pred)
+        rmse = mean_squared_error(y_test, y_pred, squared=False)
+        r2 = r2_score(y_test, y_pred)
 
-    def get_Xy(self, i, period, h1, h2, w1, w2):
-        X = self.sg_values[i: i + period, h1:h2, w1:w2].astype(np.int32)
-        X = X.reshape((period, -1)).T
+        # Formatting and printing the results
+        metrics = {
+            'Mean Absolute Error (MAE)': mae,
+            'Mean Squared Error (MSE)': mse,
+            'Root Mean Squared Error (RMSE)': rmse,
+            'R-Squared (R2)': r2
+        }
 
-        y = np.load(
-            f'{self.rootpath}/data_training/sg_clf_training_data_{self.years[i]}~{self.years[i + period - 1]}.npy')
-        y = y[h1:h2, w1:w2]
-        y[y >= 2] = 2
-        y[(y >= -3) & (y <= 1)] = 1
-        y[y == -4] = 0
-        unique, counts = np.unique(y.flatten(), return_counts=True)
-        print("y label count:", dict(zip(unique, counts)))
-        y1 = y.reshape(-1)
-        y1 = to_categorical(y1, num_classes=np.unique(y1).size)
+        print("Model Evaluation Metrics:")
+        print("----------------------------")
+        for metric, value in metrics.items():
+            print(f"{metric}: {value:.4f}")
+        print("----------------------------")
 
-        print("X shape:", X.shape)
-        print("y shape:", y.shape)
-        return X, y1, y
+        return metrics
 
     @staticmethod
     def __extract_date_from_filename(fn):
@@ -201,13 +326,13 @@ class Foo:
             t1 = datetime.now()
             with h5py.File(ndvi_h5, 'r') as hf:
                 self.NDVI = hf['NDVI'][:]
-            self.print_run_time(t1)  # run time: 00:01:34
+            self.print_run_time(t1)  # run time: 00:01:34 / 00:00:16
         else:
             print(f"Read NDVI data from {self.rootpath}")
             t1 = datetime.now()
             self.NDVI = np.zeros((len(self.hdf_files), self.x2 - self.x1, self.y2 - self.y1))
             self.__read_from_SDS()
-            self.print_run_time(t1)  # run time: 00:04:25
+            self.print_run_time(t1)  # run time: 00:04:25 / 00:02:14
 
             print(f"save NDVI data into {ndvi_h5}")
             t1 = datetime.now()
@@ -222,7 +347,8 @@ class Foo:
             print(dt)
             self.dates.append(dt)
 
-            hdf = SD(os.path.join(self.hdf_path, hdf_file), SDC.READ)
+            hdf_file_path = os.path.join(self.hdf_path, hdf_file)
+            hdf = SD(hdf_file_path, SDC.READ)
             for _, sds in enumerate(hdf.datasets().keys()):
                 # check folder
                 sds1 = sds.replace(' ', '_')
@@ -239,7 +365,8 @@ class Foo:
                     arr = ds[self.x1:self.x2 + 1, self.y1:self.y2 + 1]
 
                     # plot map
-                    if os.path.exists(fp): print(f"skipping plot {fp}")
+                    if os.path.exists(fp):
+                        print(f"skipping plot {fp}")
                     else:
                         print(f"plotting map {fp}")
                         # if self.VI_name in sds:
