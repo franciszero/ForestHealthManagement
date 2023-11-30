@@ -95,6 +95,19 @@ class ForestHealthClassification:
 
         self.pixel_classes = np.zeros_like(p_val, dtype=np.int8)
 
+        self.pixel_classes[is_forest_decline & (p_val <= 0.05)] = 1
+        self.pixel_classes[(is_forest_decline & (p_val > 0.05)) | is_forest_growth] = -1
+        self.pixel_classes[p_val == self.p_val_nan] = -1
+
+    def classify_pixels_33(self):
+        is_forest_growth = self.slopes[:, :] >= 0
+        is_forest_decline = self.slopes[:, :] < 0
+
+        # mark water region
+        p_val = np.where(self.sg_values[-1, :, :] == 0, self.p_val_nan, self.p_values)
+
+        self.pixel_classes = np.zeros_like(p_val, dtype=np.int8)
+
         self.pixel_classes[is_forest_growth & (p_val <= 0.001)] = -3
         self.pixel_classes[is_forest_decline & (p_val <= 0.001)] = 3
 
@@ -116,6 +129,34 @@ class ForestHealthClassification:
         # return year_range
 
     def __plot_it(self, year_range):
+        fig, ax = plt.subplots(figsize=(10, 10))
+        norm = Normalize(vmin=-1.1, vmax=1.1)
+        cax = ax.imshow(self.pixel_classes, norm=norm)
+
+        major_ticks = np.arange(0, self.pixel_classes.shape[1] + 1, 1000)
+        ax.set_xticks(major_ticks)
+        ax.set_yticks(major_ticks)
+
+        minor_ticks = np.arange(0, self.pixel_classes.shape[1] + 1, 200)
+        ax.set_xticks(minor_ticks, minor=True)
+        ax.set_yticks(minor_ticks, minor=True)
+        ax.tick_params(axis='both', which='minor', size=0)
+
+        ax.grid(True, which='both', color='white', linewidth=0.5, linestyle='--')
+        ax.grid(which='minor', color='white', alpha=0.4)
+        ax.grid(which='major', color='white', alpha=0.8)
+
+        cbar = fig.colorbar(cax, orientation='vertical')
+        ttl = (f'Forest Health prediction based on SG trend({self.clf_name}) {year_range}\n' +
+               f'Prediction Accuracy: %s(MAE), %s(RMSE), %s(R2)' % (
+                   "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Mean Absolute Error (MAE)"],
+                   "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Root Mean Squared Error (RMSE)"],
+                   "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["R-Squared (R2)"])
+               )
+        ax.set_title(ttl)
+        return fig
+
+    def __plot_it_7(self, year_range):
         fig, ax = plt.subplots(figsize=(10, 10))
         colors = ['#1E1EFF',  # Aquatic Area
                   '#EF6FFF',  # Strong Growth

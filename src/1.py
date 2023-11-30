@@ -86,32 +86,31 @@ class Foo:
 
         ms = ModelSelection(self.sg_values)  # test_xy=(0, 0), test_hw=(4800, 4800)
 
-        ms.train_nn(1)  # LSTM_1, Total params: 357056100 (1.33 GB)
-        ms.train_nn(6)  # LSTM_1_v1, [Adding Residual Connections], Total params: 545017536 (2.03 GB)
-        # ms.train_nn(7)  # LSTM_1_v2, [Using a ConvLSTM2D Layer], requires 4D input
-        ms.train_nn(8)  # LSTM_1_v3, [Adding Attention Mechanism], Total params: 560956211 (2.09 GB)
-        # ms.train_nn(9)  # LSTM_1_v4, [Using a Hybrid CNN-RNN with Skip Connections], Total params: 1072691232 (4.00 GB)
-        ms.train_nn(10)  # LSTM_1_v5, [Adding Spatial Dropout and More Regularization], Total params: 316939504 (1.18 GB)
-        ms.train_nn(11)  # LSTM_1_v6, [Deeper Network with Dilated Convolutions], Total params: 529166400 (1.97 GB)
-        ms.train_nn(12)  # LSTM_1_v7, [Incorporating Attention Mechanisms], Total params: 316972593 (1.18 GB)
-
         name_lr, model_lr, y_pred_lr, metrics_lr = ms.train_lr()
         name_xgb, model_xgb, y_pred_xgb, metrics_xgb = ms.train_xgb()
         # name_rf, model_rf, y_pred_rf, metrics_rf = ms.train_rf()
         name_dt, model_dt, y_pred_dt, metrics_dt = ms.train_dt()
         # name_svr, model_svr, y_pred_svr, metrics_svr = ms.train_svr()
-        name_en, model_en, y_pred_en, metrics_en = ms.train_ensemble_model([(name_lr, model_lr),
-                                                                            (name_xgb, model_xgb),
-                                                                            # (name_rf, model_rf),
-                                                                            (name_dt, model_dt),
-                                                                            # (name_svr, model_svr)
-                                                                            ])
 
-        '''
-        把计算线性回归的部分，和像素分类的部分，写到一个新的 class 里
-        可视化对比 map fact 森林健康染色图，和预测森林健康染色图
-        做 confuse matrix 的 heatmap，看每个模型在森林健康/不健康上的预测准确率
-        '''
+        ms.train_nn(1)  # LSTM_1, Total params: 357056100 (1.33 GB)
+        ms.train_nn(6)  # LSTM_1_v1,
+        ms.train_nn(7)  # LSTM_1_v2,
+        ms.train_nn(8)  # LSTM_1_v3,
+        ms.train_nn(9)  # LSTM_1_v4,
+        ms.train_nn(10)  # LSTM_1_v5,
+        ms.train_nn(11)  # LSTM_1_v6,
+
+        # name_lr, model_lr, y_pred_lr, metrics_lr = ms.train_lr()
+        # name_xgb, model_xgb, y_pred_xgb, metrics_xgb = ms.train_xgb()
+        # # name_rf, model_rf, y_pred_rf, metrics_rf = ms.train_rf()
+        # name_dt, model_dt, y_pred_dt, metrics_dt = ms.train_dt()
+        # # name_svr, model_svr, y_pred_svr, metrics_svr = ms.train_svr()
+        # name_en, model_en, y_pred_en, metrics_en = ms.train_ensemble_model([(name_lr, model_lr),
+        #                                                                     (name_xgb, model_xgb),
+        #                                                                     # (name_rf, model_rf),
+        #                                                                     (name_dt, model_dt),
+        #                                                                     # (name_svr, model_svr)
+        #                                                                     ])
 
         # for lr_period in range(7, 8):  # range(3, 14):
         #     for i, year in enumerate(self.years):
