@@ -3,3 +3,4 @@
 .idea
 *.npy
 *.hdf
+src/__pycache__
