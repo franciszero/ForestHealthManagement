@@ -148,7 +148,7 @@ class ForestHealthClassification:
 
         cbar = fig.colorbar(cax, orientation='vertical')
         ttl = (f'Forest Health prediction based on SG trend({self.clf_name}) {year_range}\n' +
-               f'Prediction Accuracy: %s(MAE), %s(RMSE), %s(R2)' % (
+               f'Prediction Metrics: %s(MAE), %s(RMSE), %s(R2)' % (
                    "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Mean Absolute Error (MAE)"],
                    "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Root Mean Squared Error (RMSE)"],
                    "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["R-Squared (R2)"])
@@ -198,7 +198,7 @@ class ForestHealthClassification:
         cbar = fig.colorbar(cax, ticks=list(ticks_dict.keys()), orientation='vertical')
         cbar.ax.set_yticklabels(ticks_dict.values())
         ttl = (f'Forest Health prediction based on SG trend({self.clf_name}) {year_range}\n' +
-               f'Prediction Accuracy: %s(MAE), %s(RMSE), %s(R2)' % (
+               f'Prediction Metrics: %s(MAE), %s(RMSE), %s(R2)' % (
                    "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Mean Absolute Error (MAE)"],
                    "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Root Mean Squared Error (RMSE)"],
                    "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["R-Squared (R2)"])

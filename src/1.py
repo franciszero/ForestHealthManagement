@@ -86,19 +86,27 @@ class Foo:
 
         ms = ModelSelection(self.sg_values)  # test_xy=(0, 0), test_hw=(4800, 4800)
 
-        name_lr, model_lr, y_pred_lr, metrics_lr = ms.train_lr()
-        name_xgb, model_xgb, y_pred_xgb, metrics_xgb = ms.train_xgb()
-        # name_rf, model_rf, y_pred_rf, metrics_rf = ms.train_rf()
-        name_dt, model_dt, y_pred_dt, metrics_dt = ms.train_dt()
-        # name_svr, model_svr, y_pred_svr, metrics_svr = ms.train_svr()
+        # for d1 in [0.1, 0.3, 0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]:
+        #     for d2 in [0.1, 0.3, 0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]:
+        #         ms.train_nn(1, (16, 16, 32), (d1, d2))  # LSTM_1, Flatten(), 260065232 (992.07 MB)
 
-        ms.train_nn(1)  # LSTM_1, Total params: 357056100 (1.33 GB)
-        ms.train_nn(6)  # LSTM_1_v1,
-        ms.train_nn(7)  # LSTM_1_v2,
-        ms.train_nn(8)  # LSTM_1_v3,
-        ms.train_nn(9)  # LSTM_1_v4,
-        ms.train_nn(10)  # LSTM_1_v5,
-        ms.train_nn(11)  # LSTM_1_v6,
+        # for d1 in [0.35, 0.55, 0.75]:
+        #     for d2 in [0.35, 0.55, 0.75]:
+        #         for d3 in [0.35, 0.55, 0.75]:
+        #             ms.train_nn(2, (16, 16, 32), (d1, d2, d3))  # 132032336 (503.66 MB)
+
+        for f3 in [32, 16]:
+            for d1 in [0.5, 0.7]:
+                for d2 in [0.3, 0.5, 0.7]:
+                    for d3 in [0.3, 0.5, 0.7]:
+                        ms.train_nn(3, (16, 16, f3), (d1, d2, d3))  # 132032336 (503.66 MB)
+
+        # ms.train_nn(6)  # LSTM_1_v1,
+        # ms.train_nn(7)  # LSTM_1_v2,
+        # ms.train_nn(8)  # LSTM_1_v3, 1028017569 (3.83 GB)
+        # ms.train_nn(9)  # LSTM_1_v4, 1028017569 (3.83 GB)
+        # ms.train_nn(10)  # LSTM_1_v5, 1028021697 (3.83 GB)
+        # ms.train_nn(11)  # LSTM_1_v6, 260071105 (992.09 MB)
 
         # name_lr, model_lr, y_pred_lr, metrics_lr = ms.train_lr()
         # name_xgb, model_xgb, y_pred_xgb, metrics_xgb = ms.train_xgb()

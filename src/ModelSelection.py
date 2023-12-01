@@ -35,7 +35,8 @@ from keras.layers import (ConvLSTM2D, Dense, Flatten, TimeDistributed, LSTM, Con
                           GlobalAveragePooling2D, Dropout, BatchNormalization, LeakyReLU, ReLU, Multiply, Permute,
                           Reshape, Lambda, RepeatVector)
 from keras import Input, Model
-from keras.src.layers import Activation, Add, Concatenate, SpatialDropout2D, Bidirectional
+from keras.src.layers import Activation, Add, Concatenate, SpatialDropout2D, Bidirectional, AveragePooling2D, \
+    SeparableConv2D, GRU
 from keras.optimizers.legacy import Adam
 from keras.src.optimizers import RMSprop
 from keras.regularizers import l2
@@ -92,17 +93,21 @@ class ModelSelection:
             self.X_test_svr = self.scaler2.transform(self.X_test_svr)
         self.y_test_svr = self.sg_values[time_steps + self.o, h1:h2, w1:w2].flatten()
 
-    def train_nn(self, idx):
+    def train_nn(self, idx, conv_filters, lstm_dropouts):
         h, w = self.train_hw
 
-        if idx in (1, 2, 3, 6, 7, 8, 9, 10, 11, 12):
+        if idx in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
             X_train, X_val, X_test, y_train, y_val, y_test = self.train_test_gen1(h, w, scaling=False)
             if idx == 1:
-                name, weight_file, model = self.nn1(h, w)
+                name, weight_file, model = self.nn1(idx, h, w, conv_filters, lstm_dropouts)
             elif idx == 2:
-                name, weight_file, model = self.nn2(h, w)
+                name, weight_file, model = self.nn2(idx, h, w, conv_filters, lstm_dropouts)
             elif idx == 3:
-                name, weight_file, model = self.nn3(h, w)
+                name, weight_file, model = self.nn3(h, w, conv_filters, lstm_dropouts)
+            elif idx == 4:
+                name, weight_file, model = self.nn4(h, w)
+            elif idx == 5:
+                name, weight_file, model = self.nn5(h, w)
             elif idx == 6:
                 name, weight_file, model = self.nn1_v1(h, w)
             elif idx == 7:
@@ -119,12 +124,6 @@ class ModelSelection:
                 name, weight_file, model = self.nn1_v7(h, w)
             else:
                 return
-        elif idx in (4, 5):
-            X_train, X_val, X_test, y_train, y_val, y_test = self.train_test_gen2(h, w)
-            if idx == 4:
-                name, weight_file, model = self.nn_t1(h, w)
-            else:
-                return
         else:
             return
 
@@ -133,7 +132,7 @@ class ModelSelection:
             model = load_model(weight_file, custom_objects={'SeqSelfAttention': SeqSelfAttention})
             print(f"Loaded model from {weight_file}. Continuing training.")
         except (ImportError, IOError):
-            print("No saved model found. Starting fresh training.")
+            print(f"No saved model found: {weight_file}. Starting fresh training.")
 
         # early stop & check point
         callbacks = [
@@ -182,9 +181,9 @@ class ModelSelection:
             print(f"{metric}: {value:.4f}")
         print("----------------------------")
 
-        fig = self.FH_clf_visualization(name, y_pred, metrics)
+        self.FH_clf_visualization(name, y_pred, metrics)
 
-        return fig
+        return
 
     @staticmethod
     def train_test_data_dist(ds):
@@ -232,10 +231,6 @@ class ModelSelection:
     def nn1_v7(self, h, w):
         name = "LSTM_1_v7"
         weight_file = 'best_LSTM_model_1_v7.h5'
-
-    def nn1_v6(self, h, w):
-        name = "LSTM_1_v6"
-        weight_file = 'best_LSTM_model_1_v6.h5'
 
     def nn1_v6(self, h, w):
         """
@@ -585,132 +580,211 @@ class ModelSelection:
         x = Multiply()([x, attention])
         return x
 
-    def nn3(self, h, w):
-        name = "LSTM_3"
-        weight_file = 'best_LSTM_model_3.h5'
+    def nn5(self, h, w, conv_filters, convlstm_units, l2_reg=0.001):
+        dropout_str = "-".join(["drops"] + [f"{d:.2f}".replace('.', '_') for d in convlstm_units])
+        name = f"LSTM5__{dropout_str}"
+        weight_file = f'Best_LSTM5__{dropout_str}.h5'
 
-        model = Sequential()
-        # spacial
-        model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3),
-                                         kernel_regularizer=l2(0.001)), input_shape=(self.time_steps, h, w, 1)))
-        model.add(TimeDistributed(BatchNormalization()))
-        model.add(TimeDistributed(Activation('relu')))
-        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+        input_layer = Input(shape=(self.time_steps, h, w, 1))
 
-        model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), kernel_regularizer=l2(0.001))))
-        model.add(TimeDistributed(BatchNormalization()))
-        model.add(TimeDistributed(Activation('relu')))
-        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
+        # Inception Module
+        tower_1 = TimeDistributed(Conv2D(conv_filters[0], (1, 1), padding='same', activation='relu'))(input_layer)
+        tower_2 = TimeDistributed(Conv2D(conv_filters[1], (3, 3), padding='same', activation='relu'))(input_layer)
+        tower_3 = TimeDistributed(Conv2D(conv_filters[2], (5, 5), padding='same', activation='relu'))(input_layer)
+        x = Concatenate()([tower_1, tower_2, tower_3])
 
-        model.add(TimeDistributed(Flatten()))
+        # Spatial Pyramid Pooling
+        x = TimeDistributed(SpatialPyramidPooling([1, 2, 4]))(x)
 
-        # temporal
-        model.add(LSTM(units=20, activation='relu', kernel_regularizer=l2(0.001), return_sequences=False))
-        model.add(Dropout(0.5))
-        # model.add(BatchNormalization())
-        # output
-        model.add(Dense(units=h * w, activation='linear'))
-        # optimizer
-        model.compile(optimizer=Adam(), loss='mean_squared_error')
+        # ConvLSTM Layers
+        x = ConvLSTM2D(convlstm_units[0], (3, 3), padding='same', return_sequences=True)(x)
+        x = BatchNormalization()(x)
+        x = ConvLSTM2D(convlstm_units[1], (3, 3), padding='same', return_sequences=False)(x)
+        x = BatchNormalization()(x)
+
+        # Dense Layers
+        x = Flatten()(x)
+        x = Dense(512, activation='relu', kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(0.4)(x)
+        x = Dense(256, activation='relu', kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(0.4)(x)
+
+        # Output Layer
+        output = Dense(units=h * w, activation='linear')(x)
+
+        # Compile Model
+        model = Model(inputs=input_layer, outputs=output, name=name)
+        model.compile(optimizer=Adam(lr=0.0001), loss='mean_squared_error', metrics=['mae'])
         model.summary()
+
         return name, weight_file, model
 
-    def nn2(self, h, w):
-        name = "LSTM_2"
-        weight_file = 'best_LSTM_model_2.h5'
+    def nn4(self, h, w, conv_filters, gru_units, gru_dropouts, l2_reg=0.001):
+        dropout_str = "-".join(["drops"] + [f"{d:.2f}".replace('.', '_') for d in gru_dropouts])
+        name = f"LSTM4__{dropout_str}"
+        weight_file = f'Best_LSTM4__{dropout_str}.h5'
 
-        model = Sequential()
-        model.add(TimeDistributed(Conv2D(filters=8, kernel_size=(3, 3), activation='relu',
-                                         kernel_regularizer=l2(0.001)), input_shape=(self.time_steps, h, w, 1)))
-        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-        model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), activation='relu',
-                                         kernel_regularizer=l2(0.001))))
-        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-        model.add(TimeDistributed(GlobalAveragePooling2D()))
-        # model.add(TimeDistributed(Flatten()))
-        model.add(LSTM(units=16, activation='relu', kernel_regularizer=l2(0.001)))
-        model.add(Dropout(0.5))
-        model.add(Dense(units=32, activation='relu', kernel_regularizer=l2(0.001)))
-        model.add(Dense(units=h * w, activation='linear'))
-        optimizer = Adam()
-        model.compile(optimizer=optimizer, loss='mean_squared_error')
+        input_layer = Input(shape=(self.time_steps, h, w, 1))
+
+        f1, f2, f3 = conv_filters
+        u1, u2, u3 = gru_units
+        d1, d2, d3 = gru_dropouts
+
+        # First Conv Block with Depthwise Separable Convolution
+        x = TimeDistributed(SeparableConv2D(filters=f1, kernel_size=(3, 3), padding='same',
+                                            dilation_rate=1, depth_multiplier=2,
+                                            kernel_regularizer=l2(l2_reg)))(input_layer)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
+
+        # Multi-Scale Convolution
+        conv_3x3 = TimeDistributed(Conv2D(filters=f2, kernel_size=(3, 3), padding='same'))(x)
+        conv_5x5 = TimeDistributed(Conv2D(filters=f2, kernel_size=(5, 5), padding='same'))(x)
+        x = Concatenate()([conv_3x3, conv_5x5])
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+
+        # Dilated Convolution Block
+        x = TimeDistributed(Conv2D(filters=f3, kernel_size=(3, 3), padding='same', dilation_rate=2))(x)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
+
+        # Global Average Pooling
+        x = TimeDistributed(GlobalAveragePooling2D())(x)
+
+        # GRU Layers with Attention
+        x = GRU(units=u1, return_sequences=True, kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(d1)(x)
+        x = SeqSelfAttention(attention_activation='softmax')(x)
+        x = GRU(units=u2, return_sequences=True, kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(d2)(x)
+        x = GRU(units=u3, kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(d3)(x)
+
+        # Dense Output Layer
+        x = Dense(units=128, activation='relu')(x)
+        output = Dense(units=h * w, activation='linear')(x)
+
+        # Compile Model
+        model = Model(inputs=input_layer, outputs=output, name=name)
+        model.compile(optimizer=Adam(lr=0.0005), loss='mean_squared_error', metrics=['mae'])
         model.summary()
+
         return name, weight_file, model
 
-    def nn1(self, h, w):
-        name = "LSTM_1"
-        weight_file = 'best_LSTM_model_1.h5'
+    def nn3(self, idx, h, w, conv_filters, lstm_dropouts, l2_reg=0.001):
 
-        model = Sequential()
-        model.add(TimeDistributed(Conv2D(filters=16, kernel_size=(3, 3), padding='same'),
-                                  input_shape=(self.time_steps, h, w, 1)))
-        model.add(TimeDistributed(BatchNormalization()))
-        model.add(TimeDistributed(Activation('relu')))
-        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-
-        model.add(TimeDistributed(Conv2D(filters=32, kernel_size=(3, 3), padding='same')))
-        model.add(TimeDistributed(BatchNormalization()))
-        model.add(TimeDistributed(Activation('relu')))
-        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-
-        model.add(TimeDistributed(Conv2D(filters=64, kernel_size=(3, 3), padding='same')))
-        model.add(TimeDistributed(BatchNormalization()))
-        model.add(TimeDistributed(Activation('relu')))
-        model.add(TimeDistributed(MaxPooling2D(pool_size=(2, 2))))
-
-        model.add(TimeDistributed(Flatten()))
-        model.add(LSTM(units=64, activation='relu', return_sequences=True))
-        model.add(Dropout(0.5))
-        model.add(LSTM(units=32, activation='relu'))
-        model.add(Dropout(0.5))
-        model.add(Dense(units=h * w, activation='linear'))
-        model.compile(optimizer=Adam(), loss='mean_squared_error')
-        model.summary()
         return name, weight_file, model
 
-    def train_test_gen2(self, h, w):
-        h1, w1 = self.train_xy
-        h2, w2 = h1 + h, w1 + w
-        X_train = self.sg_values[0:self.time_steps, h1:h2, w1:w2].reshape(-1, self.time_steps, h * w)
-        y_train = self.sg_values[self.time_steps, h1:h2, w1:w2].reshape(1, -1)
+    def nn2(self, idx, h, w, conv_filters, lstm_dropouts):
+        dropout_str = "-".join(["drops"] + [f"{d:.2f}".replace('.', '_') for d in gru_dropouts])
+        name = f"LSTM4__{dropout_str}"
+        weight_file = f'Best_LSTM4__{dropout_str}.h5'
 
-        h1, w1 = self.val_xy
-        h2, w2 = h1 + h, w1 + w
-        X_val = self.sg_values[0:self.time_steps, h1:h2, w1:w2].reshape(-1, self.time_steps, h * w)
-        y_val = self.sg_values[self.time_steps + 1, h1:h2, w1:w2].reshape(1, -1)
+        input_layer = Input(shape=(self.time_steps, h, w, 1))
 
-        h1, w1 = self.test_hw
-        h2, w2 = h1 + h, w1 + w
-        X_test = self.sg_values[1:self.time_steps + 1, h1:h2, w1:w2].reshape(-1, self.time_steps, h * w)
-        y_test = self.sg_values[self.time_steps + 1, h1:h2, w1:w2].reshape(1, -1)
+        f1, f2, f3 = conv_filters
+        u1, u2, u3 = gru_units
+        d1, d2, d3 = gru_dropouts
 
-        print("X_train.shape = ", X_train.shape)
-        print("y_train.shape = ", y_train.shape)
-        print("X_val.shape = ", X_val.shape)
-        print("y_val.shape = ", y_val.shape)
-        print("X_test.shape = ", X_test.shape)
-        print("y_test.shape = ", y_test.shape)
+        # First Conv Block with Depthwise Separable Convolution
+        x = TimeDistributed(SeparableConv2D(filters=f1, kernel_size=(3, 3), padding='same',
+                                            dilation_rate=1, depth_multiplier=2,
+                                            kernel_regularizer=l2(l2_reg)))(input_layer)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
 
-        return X_train, X_val, X_test, y_train, y_val, y_test
+        # Multi-Scale Convolution
+        conv_3x3 = TimeDistributed(Conv2D(filters=f2, kernel_size=(3, 3), padding='same'))(x)
+        conv_5x5 = TimeDistributed(Conv2D(filters=f2, kernel_size=(5, 5), padding='same'))(x)
+        x = Concatenate()([conv_3x3, conv_5x5])
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
 
-    def nn_t1(self, h, w):
-        name = "LSTM_T1"
-        weight_file = 'best_LSTM_model_T1.h5'
+        # Dilated Convolution Block
+        x = TimeDistributed(Conv2D(filters=f3, kernel_size=(3, 3), padding='same', dilation_rate=2))(x)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
 
-        model = Sequential()
-        model.add(LSTM(units=50, activation='relu', input_shape=(self.time_steps, h * w), return_sequences=True))
-        model.add(Dropout(0.3))
-        model.add(LSTM(units=30, activation='relu'))
-        model.add(Dropout(0.3))
-        model.add(Dense(units=h * w, activation='linear'))
-        model.compile(optimizer=Adam(), loss='mean_squared_error')
+        # Global Average Pooling
+        x = TimeDistributed(GlobalAveragePooling2D())(x)
+
+        # GRU Layers with Attention
+        x = GRU(units=u1, return_sequences=True, kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(d1)(x)
+        x = SeqSelfAttention(attention_activation='softmax')(x)
+        x = GRU(units=u2, return_sequences=True, kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(d2)(x)
+        x = GRU(units=u3, kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(d3)(x)
+
+        # Dense Output Layer
+        x = Dense(units=128, activation='relu')(x)
+        output = Dense(units=h * w, activation='linear')(x)
+
+        # Compile Model
+        model = Model(inputs=input_layer, outputs=output, name=name)
+        model.compile(optimizer=Adam(lr=0.0005), loss='mean_squared_error', metrics=['mae'])
         model.summary()
+        
+        return name, weight_file, model
+
+    def nn1(self, id, h, w, conv_filters, lstm_dropouts):
+        dropout_str = "-".join(["drops"] + [f"{d:.2f}".replace('.', '_') for d in lstm_dropouts])
+        name = f"LSTM{id}__{dropout_str}"
+        weight_file = f'Best_LSTM{id}__{dropout_str}.h5'
+
+        input_layer = Input(shape=(self.time_steps, h, w, 1))
+
+        f1, f2, f3 = conv_filters
+        x = TimeDistributed(Conv2D(filters=f1, kernel_size=(3, 3), padding='same', dilation_rate=2,
+                                   kernel_regularizer=l2(l2_reg)))(input_layer)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(3, 3)))(x)
+
+        previous_block_activation = x
+        for _ in range(2):
+            x = TimeDistributed(Conv2D(filters=f2, kernel_size=(5, 5), padding='same', activation='relu',
+                                       kernel_regularizer=l2(l2_reg)))(x)
+            x = TimeDistributed(BatchNormalization())(x)
+            x = TimeDistributed(Activation('relu'))(x)
+        x = Add()([x, previous_block_activation])
+
+        x = TimeDistributed(Conv2D(filters=f3, kernel_size=(7, 7), padding='same', dilation_rate=2,
+                                   kernel_regularizer=l2(l2_reg)))(x)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(5, 5)))(x)
+
+        # Global Average Pooling
+        x = TimeDistributed(GlobalAveragePooling2D())(x)
+
+        d1, d2 = lstm_dropouts
+        x = LSTM(units=128, activation='relu', kernel_regularizer=l2(l2_reg), return_sequences=True)(x)
+        x = Dropout(d1)(x)
+        x = SeqSelfAttention(attention_activation='softmax')(x)
+        x = LSTM(units=64, activation='relu', kernel_regularizer=l2(l2_reg), return_sequences=True)(x)
+        x = Dropout(d2)(x)
+
+        # Output layer
+        x = Dense(units=128, activation='relu')(x)
+        output = Dense(units=h * w, activation='linear')(x)
+
+        # Compile model
+        model = Model(inputs=input_layer, outputs=output, name=name)
+        model.compile(optimizer=Adam(), loss='mean_squared_error', metrics=['mae'])
+        model.summary()
+
         return name, weight_file, model
 
     @staticmethod
     def training_performance_plot(history, weight_file):
-        # performance
-        plt.figure(figsize=(10, 4))
+        fig = plt.figure(figsize=(10, 4))
         plt.plot(history.history['loss'], label='Train Loss')
         plt.plot(history.history['val_loss'], label='Validation Loss')
         plt.title('Model Performance')
@@ -719,6 +793,7 @@ class ModelSelection:
         plt.legend()
         # plt.show()
         plt.savefig(f"{weight_file}.png")
+        plt.close(fig)
         return
 
     def train_lr(self):
@@ -1213,8 +1288,9 @@ class ModelSelection:
         plt.close(fig1)
         plt.close(fig2)
         plt.close(fig3)
+        plt.close(fig)
 
-        return fig
+        return
 
     @staticmethod
     def FH_clf_acc(name, clf, cls_pred, cls_truth):
