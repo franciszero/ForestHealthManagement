@@ -38,11 +38,12 @@ from keras.src.optimizers import RMSprop
 
 
 class ForestHealthClassification:
-    def __init__(self, clf_name, sg_values, metrics, years, lr_range=7):
+    def __init__(self, clf_name, sg_values, metrics, years, is_discrete, lr_range=7):
         self.clf_name = clf_name
         self.sg_values = sg_values
         self.metrics = metrics
         self.years = years
+        self.is_discrete = is_discrete
         self.lr_range = lr_range
         self.yrs = self.years[-self.lr_range:]
         self.year_range = "%s~%s" % (self.yrs[-self.lr_range], self.yrs[-1])
@@ -53,6 +54,7 @@ class ForestHealthClassification:
         self.intercepts = None
         self.slopes = None
         self.r_values = None
+        self.pixel_unified_p_vals = None
         self.pixel_classes = None
 
     def linear_regress(self):
@@ -90,14 +92,27 @@ class ForestHealthClassification:
         is_forest_growth = self.slopes[:, :] >= 0
         is_forest_decline = self.slopes[:, :] < 0
 
+        # p_val = np.where(self.sg_values[-1, :, :] == 0, 1, self.p_values)  # current map slice
+        # self.pixel_classes = np.zeros_like(p_val, dtype=np.int8)
+        #
+        # self.pixel_classes[is_forest_decline & (p_val <= 0.05)] = 1
+        # self.pixel_classes[(is_forest_decline & (p_val > 0.05)) | is_forest_growth] = -1
+        # self.pixel_classes[p_val == self.p_val_nan] = -1
+
         # mark water region
-        p_val = np.where(self.sg_values[-1, :, :] == 0, self.p_val_nan, self.p_values)
-
+        p_val = np.where(self.sg_values[-1, :, :] == 0, 0.0, 1 - self.p_values)
+        p_val[is_forest_growth] = - p_val[is_forest_growth]  # healthy - normal - unhealthy
+        # p_val = np.where(p_val < 0.95, (p_val + 1) / 1.95 / 2, (p_val - 0.95) * 10 + 0.5)
+        # plt.hist(p_val.flatten(), bins=200)
+        # plt.title('Value Distribution')
+        # plt.xlabel('Values')
+        # plt.ylabel('Frequency')
+        # plt.show()
+        self.pixel_unified_p_vals = p_val
         self.pixel_classes = np.zeros_like(p_val, dtype=np.int8)
-
-        self.pixel_classes[is_forest_decline & (p_val <= 0.05)] = 1
-        self.pixel_classes[(is_forest_decline & (p_val > 0.05)) | is_forest_growth] = -1
-        self.pixel_classes[p_val == self.p_val_nan] = -1
+        self.pixel_classes[(p_val >= 0.95)] = 1
+        self.pixel_classes[(p_val < 0.95)] = 0
+        return
 
     def classify_pixels_33(self):
         is_forest_growth = self.slopes[:, :] >= 0
@@ -130,7 +145,7 @@ class ForestHealthClassification:
 
     def __plot_it(self, year_range):
         fig, ax = plt.subplots(figsize=(10, 10))
-        norm = Normalize(vmin=-1.1, vmax=1.1)
+        norm = Normalize(vmin=-0.1, vmax=1.1)
         cax = ax.imshow(self.pixel_classes, norm=norm)
 
         major_ticks = np.arange(0, self.pixel_classes.shape[1] + 1, 1000)
@@ -147,12 +162,17 @@ class ForestHealthClassification:
         ax.grid(which='major', color='white', alpha=0.8)
 
         cbar = fig.colorbar(cax, orientation='vertical')
-        ttl = (f'Forest Health prediction based on SG trend({self.clf_name}) {year_range}\n' +
-               f'Prediction Metrics: %s(MAE), %s(RMSE), %s(R2)' % (
-                   "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Mean Absolute Error (MAE)"],
-                   "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Root Mean Squared Error (RMSE)"],
-                   "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["R-Squared (R2)"])
-               )
+        ttl = f'Forest Health prediction based on SG trend({self.clf_name}) {year_range}\n'
+        if self.is_discrete:
+            ttl += f'Prediction Metrics: %s(accuracy), %s(f1 score)' % (
+                "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["accuracy"],
+                "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["f1 score"])
+        else:
+            ttl += f'Prediction Metrics: %s(MAE), %s(RMSE), %s(R2)' % (
+                "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Mean Absolute Error (MAE)"],
+                "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Root Mean Squared Error (RMSE)"],
+                "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["R-Squared (R2)"])
+
         ax.set_title(ttl)
         return fig
 

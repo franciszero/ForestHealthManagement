@@ -70,73 +70,37 @@ class Foo:
         self.p_val_nan = 10
         pass
 
-    def process(self, decomp_period=24):
-        # self.__foo()
+    def preprocess(self, decomp_period=24):
+        self.__foo()
 
-        # for x in range(0, 4800, 500):
-        #     for y in range(0, 4800, 500):
-        #         self.plot_time_series(x, y, period=decomp_period)
+        for x in range(0, 4800, 500):
+            for y in range(0, 4800, 500):
+                self.plot_time_series(x, y, period=decomp_period)
 
         self.__compute_sg_values()  # save sg values
-        # fig0, ax0 = plt.subplots(figsize=(12, 4))
-        # for x1 in range(0, 4800, 500):
-        #     for y1 in range(0, 4800, 500):
-        #         self.plot_time_series_with_regression(x1, y1)
-        # plt.close(fig0)
+        fig0, ax0 = plt.subplots(figsize=(12, 4))
+        for x1 in range(0, 4800, 500):
+            for y1 in range(0, 4800, 500):
+                self.plot_time_series_with_regression(x1, y1)
+        plt.close(fig0)
 
-        ms = ModelSelection(self.sg_values)  # test_xy=(0, 0), test_hw=(4800, 4800)
+        for lr_period in range(7, 8):  # range(3, 14):
+            for i, year in enumerate(self.years):
+                if i + lr_period - 1 >= len(self.years):
+                    break
+                else:
+                    start_year, end_year = year, year + lr_period - 1
+                    end_idx = i + lr_period - 1
 
-        # for d1 in [0.1, 0.3, 0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]:
-        #     for d2 in [0.1, 0.3, 0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]:
-        #         ms.train_nn(1, (16, 16, 32), (d1, d2))  # LSTM_1, Flatten(), 260065232 (992.07 MB)
-
-        # for d1 in [0.35, 0.55, 0.75]:
-        #     for d2 in [0.35, 0.55, 0.75]:
-        #         for d3 in [0.35, 0.55, 0.75]:
-        #             ms.train_nn(2, (16, 16, 32), (d1, d2, d3))  # 132032336 (503.66 MB)
-
-        for f3 in [32, 16]:
-            for d1 in [0.5, 0.7]:
-                for d2 in [0.3, 0.5, 0.7]:
-                    for d3 in [0.3, 0.5, 0.7]:
-                        ms.train_nn(3, (16, 16, f3), (d1, d2, d3))  # 132032336 (503.66 MB)
-
-        # ms.train_nn(6)  # LSTM_1_v1,
-        # ms.train_nn(7)  # LSTM_1_v2,
-        # ms.train_nn(8)  # LSTM_1_v3, 1028017569 (3.83 GB)
-        # ms.train_nn(9)  # LSTM_1_v4, 1028017569 (3.83 GB)
-        # ms.train_nn(10)  # LSTM_1_v5, 1028021697 (3.83 GB)
-        # ms.train_nn(11)  # LSTM_1_v6, 260071105 (992.09 MB)
-
-        # name_lr, model_lr, y_pred_lr, metrics_lr = ms.train_lr()
-        # name_xgb, model_xgb, y_pred_xgb, metrics_xgb = ms.train_xgb()
-        # # name_rf, model_rf, y_pred_rf, metrics_rf = ms.train_rf()
-        # name_dt, model_dt, y_pred_dt, metrics_dt = ms.train_dt()
-        # # name_svr, model_svr, y_pred_svr, metrics_svr = ms.train_svr()
-        # name_en, model_en, y_pred_en, metrics_en = ms.train_ensemble_model([(name_lr, model_lr),
-        #                                                                     (name_xgb, model_xgb),
-        #                                                                     # (name_rf, model_rf),
-        #                                                                     (name_dt, model_dt),
-        #                                                                     # (name_svr, model_svr)
-        #                                                                     ])
-
-        # for lr_period in range(7, 8):  # range(3, 14):
-        #     for i, year in enumerate(self.years):
-        #         if i + lr_period - 1 >= len(self.years):
-        #             break
-        #         else:
-        #             start_year, end_year = year, year + lr_period - 1
-        #             end_idx = i + lr_period - 1
-        #
-        #             print(f"Forest Health Classification with SG trend from {year} to {year + lr_period - 1}")
-        #             pth = f"{self.rootpath}/data_training"
-        #             year_range = "%s~%s" % (start_year, end_year)
-        #             if not os.path.exists(f'{pth}/sg_clf_training_data_{year_range}.npy'):
-        #                 self.linear_regress(i, i + lr_period - 1)
-        #                 year_range = self.classify_pixels(end_idx, start_year, end_year)
-        #                 self.plot_it(year_range, lr_period)
-        #             else:
-        #                 self.pixel_classes = np.load(f'{pth}/sg_clf_training_data_{year_range}.npy')
+                    print(f"Forest Health Classification with SG trend from {year} to {year + lr_period - 1}")
+                    pth = f"{self.rootpath}/data_training"
+                    year_range = "%s~%s" % (start_year, end_year)
+                    if not os.path.exists(f'{pth}/sg_clf_training_data_{year_range}.npy'):
+                        self.linear_regress(i, i + lr_period - 1)
+                        year_range = self.classify_pixels(end_idx, start_year, end_year)
+                        self.plot_it(year_range, lr_period)
+                    else:
+                        self.pixel_classes = np.load(f'{pth}/sg_clf_training_data_{year_range}.npy')
 
     def model_training(self, model, time_steps=14, h1=0, w1=0, h=1000, w=1000):
         h2, w2 = h1 + h, w1 + w
@@ -583,4 +547,6 @@ class Foo:
 
 if __name__ == "__main__":
     foo = Foo()
-    foo.process(24)
+    # foo.preprocess(24)
+    ms = ModelSelection(foo.sg_values)
+    ms.model_comparison()
