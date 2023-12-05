@@ -57,45 +57,44 @@ class ModelSelection:
             print("File not found: ", sg_h5)
             exit(123)
 
-        mm_lr = ModelManager(self.sg_values, is_discrete=True)
-        mm_lr.train_lr(is_plot=True)
-        result_lr = mm_lr.results_dic["metrics"]
+        # mm_lr = ModelManager(self.sg_values, is_discrete=True)
+        # mm_lr.train_lr(is_plot=True)
+        # result_lr = mm_lr.results_dic["metrics"]
+        #
+        # mm_xgb = ModelManager(self.sg_values)
+        # mm_xgb.train_xgb(is_plot=True)
+        # result_xgb = mm_xgb.results_dic["metrics"]
+        #
+        # mm_dt = ModelManager(self.sg_values)
+        # mm_dt.train_dt(is_plot=True)
+        # result_dt = mm_dt.results_dic["metrics"]
+        #
+        # mm_ens = ModelManager(self.sg_values)
+        # mm_ens.train_ensemble_model([(mm_lr["name"], mm_lr["model"]),
+        #                              (mm_xgb["name"], mm_xgb["model"]),
+        #                              # (name_rf, model_rf),
+        #                              (mm_dt["name"], mm_dt["model"]),
+        #                              # (name_svr, model_svr)
+        #                              ], is_plot=True)
+        # result_ens = mm_ens.results_dic["metrics"]
 
-        mm_xgb = ModelManager(self.sg_values)
-        mm_xgb.train_xgb(is_plot=True)
-        result_xgb = mm_xgb.results_dic["metrics"]
+        ms_nn4 = ModelManager(self.sg_values, is_discrete=False)
+        ms_nn4.train_nn(4, (8, ),
+                        (8, ), (0.5, ),
+                        (16, ), (0.3, ),
+                        1, 0.5, 0.0001, 0.001, is_plot=True)
 
-        mm_dt = ModelManager(self.sg_values)
-        mm_dt.train_dt(is_plot=True)
-        result_dt = mm_dt.results_dic["metrics"]
+        # ms_nn1_1 = ModelManager(self.sg_values, is_discrete=False)
+        # ms_nn1_1.train_nn(1, (16, 16, 16),
+        #                   (32, 32), (0.3, 0.3),
+        #                   (128, 64), (0.3, 0.3),
+        #                   1, 0.5, 0.0005, 0.002, is_plot=True)
 
-        mm_ens = ModelManager(self.sg_values)
-        mm_ens.train_ensemble_model([(mm_lr["name"], mm_lr["model"]),
-                                     (mm_xgb["name"], mm_xgb["model"]),
-                                     # (name_rf, model_rf),
-                                     (mm_dt["name"], mm_dt["model"]),
-                                     # (name_svr, model_svr)
-                                     ], is_plot=True)
-        result_ens = mm_ens.results_dic["metrics"]
-
-        ms_nn1_1 = ModelManager(self.sg_values, is_discrete=False)
-        ms_nn1_1.train_nn(1, (32, 32, 32),
-                          (128, 64), (0.3, 0.3),
-                          (128, 64), (0.3, 0.3),
-                          1, 0.5, 0.002, 0.01, is_plot=True)
-
-        # ms_nn4 = ModelManager(self.sg_values, is_discrete=False)
-        # ms_nn4.train_nn(4, (2, 2, 2),
-        #                 (2, 2), (0.5, 0.5),
-        #                 (2, 2), (0.3, 0.3),
-        #                 1, 0.5, 0, 0.001, is_plot=True)
-
-        # done
         # ms_nn2_1 = ModelManager(self.sg_values, is_discrete=False)
         # ms_nn2_1.train_nn(2, (32, 32, 32),
         #                   (128, 64), (0.6, 0.4),
         #                   (128, 64), (0.6, 0.4),
-        #                   2, 0.5, 0.005, is_plot=True)
+        #                   2, 0.5, 0.005, 0.005, is_plot=True)
 
         # doing
         # ms_nn2_2 = ModelManager(self.sg_values, is_discrete=False)
@@ -105,10 +104,10 @@ class ModelSelection:
         #                   2, 0.5, 0.005, is_plot=True)
 
         # ms_nn3_1 = ModelManager(self.sg_values, is_discrete=False)
-        # ms_nn3_1.train_nn(3, (12, 12, 12),
+        # ms_nn3_1.train_nn(3, (8, 8, 8),
+        #                 (16, 16), (0.6, 0.4),
         #                 (64, 64), (0.6, 0.4),
-        #                 (64, 64), (0.6, 0.4),
-        #                 1, 0.5, 0.2, 0.01, is_plot=True)
+        #                 1, 0.5, 2000, 0.01, is_plot=True)
 
         # ms_nn3_2 = ModelManager(self.sg_values, is_discrete=False)
         # ms_nn3_2.train_nn(3, (12, 12, 12),

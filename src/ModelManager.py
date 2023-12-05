@@ -77,6 +77,7 @@ class ModelManager:
             scaling=scaling, scaler=scaler,
             is_discrete=self.is_discrete, is_plot=False)
 
+        self.pred_clf = None
         self.results_dic = None
         return
 
@@ -101,6 +102,8 @@ class ModelManager:
         return X, y, years, clf, scaler
 
     def __discrete_y(self, name, X, y, hw, years, is_plot=False):
+        if len(X.shape) == 5:
+            X = X.reshape(14, self.test_hw[0] * self.test_hw[0]).T
         sg_vals = np.concatenate([X, y.reshape(-1, 1)], axis=1).T.reshape(-1, hw[0], hw[1])
         clf = ForestHealthClassification(name, sg_vals, years, is_discrete=self.is_discrete)
         clf.linear_regress()
@@ -154,7 +157,7 @@ class ModelManager:
 
             # early stop & check point
             callbacks = [
-                EarlyStopping(monitor='val_loss', patience=15),
+                EarlyStopping(monitor='val_loss', patience=10),
                 ModelCheckpoint(
                     weight_file,
                     monitor='val_loss',
@@ -185,12 +188,21 @@ class ModelManager:
         y_pred = model.predict(self.X_test)
         # self.train_test_data_dist(y_pred)
         if self.is_discrete:
+            y_test = self.y_test
             y_pred = (y_pred >= threshold).astype(int)
-        metrics = self._model_eval(self.y_test, y_pred)
+        else:
+            self.test_clf = self.__discrete_y("Ground_Truth", self.X_test, self.y_test,
+                                              self.test_hw, self.test_years, is_plot=False)
+            self.pred_clf = self.__discrete_y(name, self.X_test, y_pred,
+                                              self.test_hw, self.test_years, is_plot=False)
+            y_test = self.test_clf.pixel_classes
+            y_pred = self.pred_clf.pixel_classes
+
+        metrics = self._model_eval(y_test, y_pred)
 
         self.save_model_info_dic(name, y_pred, metrics, model)
         if is_plot:
-            self.FH_clf_visualization(name)
+            self.FH_clf_visualization(name, metrics)
 
         return
 
@@ -414,51 +426,49 @@ class ModelManager:
             dense_units, dense_drop,
             flatten_layer, learning_rate, l2_reg=0.001
             ):
-        name = f"Simple_Model"
+        model_type = "C" if self.is_discrete else "R"
+        filter_str = "-".join(["F"] + [f"{x:d}".replace('.', '_') for x in conv_filters])
+        u1_str = "-".join(["U1"] + [f"{x:d}".replace('.', '_') for x in lstm_units])
+        d1_str = "-".join(["D1"] + [f"{x:.2f}".replace('.', '_') for x in lstm_dropouts])
+        u2_str = "-".join(["U2"] + [f"{x:d}".replace('.', '_') for x in dense_units])
+        d2_str = "-".join(["D2"] + [f"{x:.2f}".replace('.', '_') for x in dense_drop])
+        flat_str = f"FLAT-{flatten_layer}"
+        lr_str = f"LR-{str(learning_rate).replace('.', '_')}"
+        name = f"Model{idx}__{model_type}__{filter_str}__{u1_str}__{d1_str}__{u2_str}__{d2_str}__{flat_str}__{lr_str}"
         weight_file = f'Best_{name}.h5'
 
         input_layer = Input(shape=(self.time_steps, h, w, 1))
 
-        f1, f2, f3 = conv_filters
-        x = TimeDistributed(Conv2D(filters=f1, kernel_size=(13, 13), padding='same', activation='relu',
+        x = TimeDistributed(Conv2D(filters=conv_filters[0], kernel_size=(13, 13), padding='same', activation='relu',
                                    kernel_regularizer=l2(l2_reg)))(input_layer)
         x = TimeDistributed(BatchNormalization())(x)
         x = TimeDistributed(PReLU())(x)
         x = TimeDistributed(MaxPooling2D(pool_size=(5, 5)))(x)
-        # x = TimeDistributed(Conv2D(filters=f2, kernel_size=(3, 3), padding='same', activation='relu',
-        #                            kernel_regularizer=l2(l2_reg)))(x)
-        # x = TimeDistributed(BatchNormalization())(x)
-        # x = TimeDistributed(Activation('relu'))(x)
-        # x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
 
         if flatten_layer == 1:
             x = TimeDistributed(Flatten())(x)
         else:
             x = TimeDistributed(GlobalAveragePooling2D())(x)
 
-        u1, u2 = lstm_units
-        d1, d2 = lstm_dropouts
-        x = LSTM(units=u1, kernel_regularizer=l2(l2_reg))(x)
-        x = LeakyReLU(alpha=0.01)(x)
-        x = Dropout(d1)(x)
-        # x = LSTM(units=u2, activation='relu', kernel_regularizer=l2(l2_reg))(x)
-        # x = Dropout(d2)(x)
+        x = LSTM(units=lstm_units[0], activation='relu', kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(lstm_dropouts[0])(x)
 
-        # Output layer
-        du1, du2 = dense_units
-        dd1, dd2 = dense_drop
-        # x = Dense(du1, activation='relu', kernel_regularizer=l2(l2_reg))(x)
-        # x = Dropout(dd1)(x)
-        # x = Dense(du2, activation='relu', kernel_regularizer=l2(l2_reg))(x)
-        # x = Dropout(dd2)(x)
-        output = Dense(units=h * w, activation='sigmoid')(x)
+        x = Dense(dense_units[0], activation='relu', kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(dense_drop[0])(x)
+
+        # Output Layer
+        output = Dense(units=h * w, activation='sigmoid' if self.is_discrete else 'linear')(x)
 
         if learning_rate == 0:
             opt = Adam()
         else:
             opt = Adam(lr=learning_rate)
+
+        # Compile Model
         model = Model(inputs=input_layer, outputs=output, name=name)
-        model.compile(optimizer=opt, loss='binary_crossentropy', metrics=[Precision(), Recall()])
+        model.compile(optimizer=opt,
+                      loss='binary_crossentropy' if self.is_discrete else 'mean_squared_error',
+                      metrics=[Precision(), Recall()] if self.is_discrete else ['mae'])
         model.summary()
 
         return name, weight_file, model
@@ -520,8 +530,8 @@ class ModelManager:
         dd1, dd2 = dense_drop
         x = Dense(du1, activation='relu', kernel_regularizer=l2(l2_reg))(x)
         x = Dropout(dd1)(x)
-        x = Dense(du2, activation='relu', kernel_regularizer=l2(l2_reg))(x)
-        x = Dropout(dd2)(x)
+        # x = Dense(du2, activation='relu', kernel_regularizer=l2(l2_reg))(x)
+        # x = Dropout(dd2)(x)
 
         # Output Layer
         output = Dense(units=h * w, activation='sigmoid' if self.is_discrete else 'linear')(x)
@@ -689,30 +699,24 @@ class ModelManager:
     @staticmethod
     def explain_confusion_matrix(cm):
         [[tn, fp], [fn, tp]] = cm
-        tpr = tp / (tp + fn)  # True Positive Rate (TPR) or Sensitivity
-        tnr = tn / (tn + fp)  # True Negative Rate (TNR) or Specificity
-        ppv = tp / (tp + fp)  # Precision or Positive Predictive Value (PPV)
-        npv = tn / (tn + fn)  # Negative Predictive Value (NPV)
-        fpr = fp / (fp + tn)  # False Positive Rate (FPR)
-        fnr = fn / (tp + fn)  # False Negative Rate (FNR)
-        acc = (tp + tn) / (tp + tn + fp + fn)  # accuracy
-        f1 = 2 * ppv * tpr / (ppv + tpr)  # f1 score
-        return
+        dic = {
+            "tpr": tp / (tp + fn),  # True Positive Rate (TPR) or Sensitivity
+            "tnr": tn / (tn + fp),  # True Negative Rate (TNR) or Specificity
+            "ppv": tp / (tp + fp),  # Precision or Positive Predictive Value (PPV)
+            "npv": tn / (tn + fn),  # Negative Predictive Value (NPV)
+            "fpr": fp / (fp + tn),  # False Positive Rate (FPR)
+            "fnr": fn / (tp + fn),  # False Negative Rate (FNR)
+            "acc": (tp + tn) / (tp + tn + fp + fn),  # accuracy
+        }
+        dic["f1"] = 2 * dic["ppv"] * dic["tpr"] / (dic["ppv"] + dic["tpr"])  # f1 score
+        return dic
 
-    def _model_eval(self, y_test, y_pred):
-        if self.is_discrete:
-            metrics = {
-                'accuracy': accuracy_score(y_test.flatten(), y_pred.flatten()),
-                'f1 score': f1_score(y_test.flatten(), y_pred.flatten())
-            }
-        else:
-            mse = mean_squared_error(y_test, y_pred)
-            metrics = {
-                'Mean Absolute Error (MAE)': mean_absolute_error(y_test, y_pred),
-                'Mean Squared Error (MSE)': mse,
-                'Root Mean Squared Error (RMSE)': np.sqrt(mse),
-                'R-Squared (R2)': r2_score(y_test, y_pred)
-            }
+    @staticmethod
+    def _model_eval(y_test, y_pred):
+        metrics = {
+            'accuracy': accuracy_score(y_test.flatten(), y_pred.flatten()),
+            'f1 score': f1_score(y_test.flatten(), y_pred.flatten())
+        }
 
         print("----------------------------")
         for metric, value in metrics.items():
@@ -736,24 +740,22 @@ class ModelManager:
     #     clf.classify_pixels()
     #     return clf
 
-    def FH_clf_visualization(self, name, threshold=None):
+    def FH_clf_visualization(self, name, metrics, threshold=None):
         if self.is_discrete:
             fig1 = self.test_clf.plot_it(metrics=None)
             self.test_clf.clf_name = name
             self.test_clf.pixel_classes = self.results_dic["y_pred"]
             fig2 = self.test_clf.plot_it(self.results_dic["metrics"])
+            cls_true = self.results_dic["y_test"].flatten()
+            cls_pred = self.results_dic["y_pred"].flatten()
         else:
-            clf_gt = self.__discrete_y(name, self.X_test, self.results_dic["y_test"],
-                                       self.test_hw, self.test_years, is_plot=False)
-            fig1 = clf_gt.plot_it()
-            clf_pred = self.__discrete_y(name, self.X_test, self.results_dic["y_pred"],
-                                         self.test_hw, self.test_years, is_plot=False)
-            fig2 = clf_pred.plot_it()
+            fig1 = self.test_clf.plot_it()
+            fig2 = self.pred_clf.plot_it(metrics)
+            cls_true = self.test_clf.pixel_classes.flatten()
+            cls_pred = self.pred_clf.pixel_classes.flatten()
 
-        cls_true = self.results_dic["y_test"].flatten()
-        cls_pred = self.results_dic["y_pred"].flatten()
         cm = confusion_matrix(cls_true, cls_pred)
-        fig3 = self.FH_clf_acc(name, self.test_clf, cm)
+        fig3 = self.FH_clf_acc(name, self.pred_clf, cm)
 
         # Create a single figure with subplots
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
@@ -769,15 +771,15 @@ class ModelManager:
             for spine in ax.spines.values():
                 spine.set_visible(False)  # remove the spines
 
-        fig.suptitle(f'Forest Health Prediction and Accuracy ({self.test_clf.clf_name})', fontsize=12, y=0.95)
+        fig.suptitle(f'Forest Health Prediction and Accuracy ({self.pred_clf.clf_name})', fontsize=12, y=0.95)
         plt.subplots_adjust(left=0.05, right=0.95, top=0.85, bottom=0.05, wspace=0, hspace=0)
         plt.tight_layout(pad=-1)
 
-        pth = f"{self.test_clf.rootpath}/predicting/{self.test_clf.lr_range}_years_range"
+        pth = f"{self.pred_clf.rootpath}/predicting/{self.pred_clf.lr_range}_years_range"
         if not os.path.exists(pth):
             os.makedirs(pth)
         thr = f"_thr={threshold}" if threshold is not None else ""
-        fp = f"{pth}/Forest_Health_Prediction_{self.test_clf.year_range}({self.test_clf.clf_name}{thr}).png"
+        fp = f"{pth}/Forest_Health_Prediction_{self.pred_clf.year_range}({self.pred_clf.clf_name}{thr}).png"
         plt.savefig(fp)
         print(f"plot saved at {fp}")
 
@@ -790,8 +792,7 @@ class ModelManager:
 
         return
 
-    @staticmethod
-    def FH_clf_acc(name, clf, cm):
+    def FH_clf_acc(self, name, clf, cm):
         log_cm = np.log(cm + 1)
 
         fig, ax = plt.subplots(figsize=(10, 10))
@@ -806,7 +807,12 @@ class ModelManager:
 
         ax.set_xlabel('Predicted Label')
         ax.set_ylabel('True Label')
-        ax.set_title(f'Forest Health Classification Accuracy ({name})')
+        scores_dict = self.explain_confusion_matrix(cm)
+
+        ttl = f'Forest Health Classification Performance ({name})\n'
+        for k in ["acc", "f1", "tpr", "fpr"]:
+            ttl += f" {scores_dict[k]:.2f}({k})"
+        ax.set_title(ttl)
 
         pth = f"{clf.rootpath}/predicting/{clf.lr_range}_years_range"
         if not os.path.exists(pth):

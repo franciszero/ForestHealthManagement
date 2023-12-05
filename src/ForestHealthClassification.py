@@ -160,17 +160,14 @@ class ForestHealthClassification:
         ax.grid(which='major', color='white', alpha=0.8)
 
         cbar = fig.colorbar(cax, orientation='vertical')
-        ttl = f'Forest Health prediction based on SG trend({self.clf_name}) {self.year_range}\n'
-        if self.is_discrete:
-            ttl += f'Prediction Metrics: %s(accuracy), %s(f1 score)' % (
-                "\'N/A\'" if metrics is None else f"%.2f" % metrics["accuracy"],
-                "\'N/A\'" if metrics is None else f"%.2f" % metrics["f1 score"])
+        ttl = (f'Forest Health prediction based on SG trend {self.year_range}\n'
+               f'({self.clf_name})\n' +
+               f'Metrics: ')
+        if metrics is None:
+            ttl += "N/A"
         else:
-            ttl += f'Prediction Metrics: %s(MAE), %s(RMSE), %s(R2)' % (
-                "\'N/A\'" if metrics is None else f"%.2f" % metrics["Mean Absolute Error (MAE)"],
-                "\'N/A\'" if metrics is None else f"%.2f" % metrics["Root Mean Squared Error (RMSE)"],
-                "\'N/A\'" if metrics is None else f"%.2f" % metrics["R-Squared (R2)"])
-
+            for k in metrics:
+                ttl += "%s" % "\'N/A\'" if metrics is None else f"{metrics[k]:.2f}({k}) "
         ax.set_title(ttl)
         return fig
 
@@ -216,11 +213,12 @@ class ForestHealthClassification:
         cbar = fig.colorbar(cax, ticks=list(ticks_dict.keys()), orientation='vertical')
         cbar.ax.set_yticklabels(ticks_dict.values())
         ttl = (f'Forest Health prediction based on SG trend({self.clf_name}) {self.year_range}\n' +
-               f'Prediction Metrics: %s(MAE), %s(RMSE), %s(R2)' % (
-                   "\'N/A\'" if metrics is None else f"%.2f" % metrics["Mean Absolute Error (MAE)"],
-                   "\'N/A\'" if metrics is None else f"%.2f" % metrics["Root Mean Squared Error (RMSE)"],
-                   "\'N/A\'" if metrics is None else f"%.2f" % metrics["R-Squared (R2)"])
-               )
+               f'Prediction Metrics: ')
+        if metrics is None:
+            ttl += "N/A"
+        else:
+            for k, v in metrics:
+                ttl += "%s" % "\'N/A\'" if metrics is None else f"{metrics[k]:.2f}({k}) "
         ax.set_title(ttl)
         return fig
 
