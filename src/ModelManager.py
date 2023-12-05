@@ -21,7 +21,7 @@ from sklearn.metrics import confusion_matrix, mean_absolute_error, mean_squared_
 from sklearn.linear_model import LinearRegression, Lasso, Ridge, LogisticRegression
 from sklearn.svm import SVR
 from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
-from sklearn.ensemble import RandomForestRegressor, VotingRegressor
+from sklearn.ensemble import RandomForestRegressor, VotingRegressor, VotingClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.utils import compute_class_weight
@@ -37,7 +37,7 @@ from keras.layers import (ConvLSTM2D, Dense, Flatten, TimeDistributed, LSTM, Con
                           Reshape, Lambda, RepeatVector)
 from keras import Input, Model
 from keras.src.layers import Activation, Add, Concatenate, SpatialDropout2D, Bidirectional, AveragePooling2D, \
-    SeparableConv2D, GRU
+    SeparableConv2D, GRU, PReLU
 from keras.optimizers.legacy import Adam
 from keras.src.optimizers import RMSprop
 from keras.regularizers import l2
@@ -54,9 +54,10 @@ class ModelManager:
     def __init__(self, sg_values, time_steps=14,
                  train_xy=(0, 800), train_hw=(2000, 2000),
                  val_xy=(0, 2800), val_hw=(2000, 2000),
-                 test_xy=(2000, 1800), test_hw=(2000, 2000), is_discrete=True, scale=False):
+                 test_xy=(2000, 1800), test_hw=(2000, 2000), is_discrete=True, scaling=False):
         self.sg_values = np.where(sg_values[:, :, :] < 0, 0, sg_values[:, :, :])
         self.is_discrete = is_discrete
+        self.scaling = scaling
         self.years = np.load('sg_trend_yearly_range.npy')
         self.test_offset = 1
         self.time_steps = time_steps
@@ -64,18 +65,17 @@ class ModelManager:
         self.val_xy, self.val_hw = val_xy, val_hw
         self.test_xy, self.test_hw = test_xy, test_hw
 
-        #  X, y, years, clf, scaler
         self.X_train, self.y_train, self.train_years, self.train_clf, scaler = self._get_xy(
             "Input_ML", "Training_Data", train_xy, train_hw, 0,
-            scaling=False, scaler=None,
-            is_discrete=True, is_plot=False)
+            scaling=scaling, scaler=None,
+            is_discrete=self.is_discrete, is_plot=False)
 
         self.X_val, self.y_val, self.val_years, self.val_clf = None, None, None, None
 
         self.X_test, self.y_test, self.test_years, self.test_clf, _ = self._get_xy(
             "Input_ML", "Ground_Truth", test_xy, test_hw, self.test_offset,
-            scaling=False, scaler=scaler,
-            is_discrete=True, is_plot=False)
+            scaling=scaling, scaler=scaler,
+            is_discrete=self.is_discrete, is_plot=False)
 
         self.results_dic = None
         return
@@ -120,7 +120,7 @@ class ModelManager:
         h, w = self.train_hw
 
         if idx in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
-            self.train_test_gen1(scaling=False)
+            self.train_test_gen1()
             if idx == 1:
                 name, weight_file, model = self.nn1(idx, h, w, conv_filters,
                                                     rnn_units, rnn_dropouts,
@@ -154,7 +154,7 @@ class ModelManager:
 
             # early stop & check point
             callbacks = [
-                EarlyStopping(monitor='val_loss', patience=5),
+                EarlyStopping(monitor='val_loss', patience=15),
                 ModelCheckpoint(
                     weight_file,
                     monitor='val_loss',
@@ -184,7 +184,8 @@ class ModelManager:
         # Predict and evaluate
         y_pred = model.predict(self.X_test)
         # self.train_test_data_dist(y_pred)
-        y_pred = (y_pred >= threshold).astype(int)
+        if self.is_discrete:
+            y_pred = (y_pred >= threshold).astype(int)
         metrics = self._model_eval(self.y_test, y_pred)
 
         self.save_model_info_dic(name, y_pred, metrics, model)
@@ -239,26 +240,26 @@ class ModelManager:
         plt.ylabel('Frequency')
         plt.show()
 
-    def train_test_gen1(self, scaling=False):
+    def train_test_gen1(self):
         print(self.sg_values[:, self.train_xy[0], self.train_xy[1]])
 
         purpose = "Input_NN"
         self.X_train, self.y_train, self.train_years, self.train_clf, scaler = self._get_xy(
             purpose, "Training_Data", self.train_xy, self.train_hw, 0,
-            scaling=scaling, scaler=None,
-            is_discrete=True, is_plot=False)
+            scaling=self.scaling, scaler=None,
+            is_discrete=self.is_discrete, is_plot=False)
         print(self.X_train[0, :, 0, 0, 0])
 
         self.X_val, self.y_val, self.val_years, self.val_clf, scaler = self._get_xy(
             purpose, "Validation_data", self.val_xy, self.val_hw, self.test_offset,
-            scaling=scaling, scaler=scaler,
-            is_discrete=True, is_plot=False)
+            scaling=self.scaling, scaler=scaler,
+            is_discrete=self.is_discrete, is_plot=False)
         print(self.X_val[0, :, 0, 0, 0])
 
         self.X_test, self.y_test, self.test_years, self.test_clf, _ = self._get_xy(
             purpose, "Ground_Truth", self.test_xy, self.test_hw, self.test_offset,
-            scaling=scaling, scaler=scaler,
-            is_discrete=True, is_plot=False)
+            scaling=self.scaling, scaler=scaler,
+            is_discrete=self.is_discrete, is_plot=False)
         print(self.X_test[0, :, 0, 0, 0])
 
         print("X_train.shape = ", self.X_train.shape)
@@ -419,16 +420,16 @@ class ModelManager:
         input_layer = Input(shape=(self.time_steps, h, w, 1))
 
         f1, f2, f3 = conv_filters
-        x = TimeDistributed(Conv2D(filters=f1, kernel_size=(3, 3), padding='same', dilation_rate=2,
+        x = TimeDistributed(Conv2D(filters=f1, kernel_size=(13, 13), padding='same', activation='relu',
                                    kernel_regularizer=l2(l2_reg)))(input_layer)
         x = TimeDistributed(BatchNormalization())(x)
-        x = TimeDistributed(Activation('relu'))(x)
-        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
-        x = TimeDistributed(Conv2D(filters=f2, kernel_size=(3, 3), padding='same', activation='relu',
-                                   kernel_regularizer=l2(l2_reg)))(x)
-        x = TimeDistributed(BatchNormalization())(x)
-        x = TimeDistributed(Activation('relu'))(x)
-        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
+        x = TimeDistributed(PReLU())(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(5, 5)))(x)
+        # x = TimeDistributed(Conv2D(filters=f2, kernel_size=(3, 3), padding='same', activation='relu',
+        #                            kernel_regularizer=l2(l2_reg)))(x)
+        # x = TimeDistributed(BatchNormalization())(x)
+        # x = TimeDistributed(Activation('relu'))(x)
+        # x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
 
         if flatten_layer == 1:
             x = TimeDistributed(Flatten())(x)
@@ -437,24 +438,27 @@ class ModelManager:
 
         u1, u2 = lstm_units
         d1, d2 = lstm_dropouts
-        x = LSTM(units=u1, activation='relu', kernel_regularizer=l2(l2_reg), return_sequences=True)(x)
+        x = LSTM(units=u1, kernel_regularizer=l2(l2_reg))(x)
+        x = LeakyReLU(alpha=0.01)(x)
         x = Dropout(d1)(x)
-        x = LSTM(units=u2, activation='relu', kernel_regularizer=l2(l2_reg))(x)
-        x = Dropout(d2)(x)
+        # x = LSTM(units=u2, activation='relu', kernel_regularizer=l2(l2_reg))(x)
+        # x = Dropout(d2)(x)
 
         # Output layer
         du1, du2 = dense_units
         dd1, dd2 = dense_drop
-        x = Dense(du1, activation='relu', kernel_regularizer=l2(l2_reg))(x)
-        x = Dropout(dd1)(x)
+        # x = Dense(du1, activation='relu', kernel_regularizer=l2(l2_reg))(x)
+        # x = Dropout(dd1)(x)
         # x = Dense(du2, activation='relu', kernel_regularizer=l2(l2_reg))(x)
         # x = Dropout(dd2)(x)
         output = Dense(units=h * w, activation='sigmoid')(x)
 
+        if learning_rate == 0:
+            opt = Adam()
+        else:
+            opt = Adam(lr=learning_rate)
         model = Model(inputs=input_layer, outputs=output, name=name)
-        model.compile(optimizer=Adam(lr=learning_rate),
-                      loss='binary_crossentropy',
-                      metrics=[Precision(), Recall()])
+        model.compile(optimizer=opt, loss='binary_crossentropy', metrics=[Precision(), Recall()])
         model.summary()
 
         return name, weight_file, model
@@ -651,15 +655,18 @@ class ModelManager:
     #         self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
     #     return
 
-    # def train_ensemble_model(self, models, is_plot=False):
-    #     name = 'Ensemble Model'
-    #     self.__print_header(name)
-    #     model = VotingRegressor(models)
-    #     y_pred, metrics = self.__train(model, f'Best_Model__{name}.pkl')
-    #     clf_ground_truth, clf_prediction = self.save_model_info_dic(name, y_pred, metrics, model)
-    #     if is_plot:
-    #         self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
-    #     return
+    def train_ensemble_model(self, models, is_plot=False):
+        name = 'Ensemble Model'
+        self.__print_header(name)
+        if self.is_discrete:
+            model = VotingClassifier(models)
+        else:
+            model = VotingRegressor(models)
+        y_pred, metrics = self.__train(model, f'Best_Model__{name}.pkl')
+        self.save_model_info_dic(name, y_pred, metrics, model)
+        if is_plot:
+            self.FH_clf_visualization(name)
+        return
 
     def __train(self, model, model_name):
         try:
@@ -730,12 +737,18 @@ class ModelManager:
     #     return clf
 
     def FH_clf_visualization(self, name, threshold=None):
-        # display ground truth
-        fig1 = self.test_clf.plot_it(metrics=None)
-        # display prediction
-        self.test_clf.clf_name = name
-        self.test_clf.pixel_classes = self.results_dic["y_pred"]
-        fig2 = self.test_clf.plot_it(self.results_dic["metrics"])
+        if self.is_discrete:
+            fig1 = self.test_clf.plot_it(metrics=None)
+            self.test_clf.clf_name = name
+            self.test_clf.pixel_classes = self.results_dic["y_pred"]
+            fig2 = self.test_clf.plot_it(self.results_dic["metrics"])
+        else:
+            clf_gt = self.__discrete_y(name, self.X_test, self.results_dic["y_test"],
+                                       self.test_hw, self.test_years, is_plot=False)
+            fig1 = clf_gt.plot_it()
+            clf_pred = self.__discrete_y(name, self.X_test, self.results_dic["y_pred"],
+                                         self.test_hw, self.test_years, is_plot=False)
+            fig2 = clf_pred.plot_it()
 
         cls_true = self.results_dic["y_test"].flatten()
         cls_pred = self.results_dic["y_pred"].flatten()
