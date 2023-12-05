@@ -38,15 +38,13 @@ from keras.src.optimizers import RMSprop
 
 
 class ForestHealthClassification:
-    def __init__(self, clf_name, sg_values, metrics, years, is_discrete, lr_range=7):
+    def __init__(self, clf_name, sg_values, years, is_discrete):
         self.clf_name = clf_name
         self.sg_values = sg_values
-        self.metrics = metrics
         self.years = years
+        self.lr_range = len(years)
         self.is_discrete = is_discrete
-        self.lr_range = lr_range
-        self.yrs = self.years[-self.lr_range:]
-        self.year_range = "%s~%s" % (self.yrs[-self.lr_range], self.yrs[-1])
+        self.year_range = "%s~%s" % (self.years[0], self.years[-1])
         self.rootpath = '../h12v04'
         self.p_val_nan = 10
         self.std_errs = None
@@ -59,7 +57,7 @@ class ForestHealthClassification:
 
     def linear_regress(self):
         sgs = self.sg_values[-self.lr_range:, :, :]
-        years_col = self.yrs[:, np.newaxis, np.newaxis]
+        years_col = self.years[:, np.newaxis, np.newaxis]
         x_mean = np.mean(years_col)
         y_mean = np.mean(sgs, axis=0)
 
@@ -71,14 +69,14 @@ class ForestHealthClassification:
         self.intercepts = y_mean - self.slopes * x_mean
 
         # Calculate covariance and variance for r_value calculation
-        covariance = np.sum((self.yrs[:, np.newaxis, np.newaxis] - x_mean) * (sgs - y_mean), axis=0)
-        variance_x = np.sum((self.yrs - x_mean.squeeze()) ** 2)
+        covariance = np.sum((self.years[:, np.newaxis, np.newaxis] - x_mean) * (sgs - y_mean), axis=0)
+        variance_x = np.sum((self.years - x_mean.squeeze()) ** 2)
         variance_y = np.sum((sgs - y_mean) ** 2, axis=0)
         denominator = variance_x * variance_y
         self.r_values = np.where(variance_y != 0, covariance / np.sqrt(denominator), 0)
 
         # Calculate p_value and std_err
-        n = len(self.yrs)
+        n = len(self.years)
         t_stat = self.r_values * np.sqrt(n - 2) / np.sqrt(1 - self.r_values ** 2)
 
         # p value
@@ -143,9 +141,9 @@ class ForestHealthClassification:
         # np.save(f'{pth}/sg_clf_training_data_{year_range}.npy', self.pixel_classes)
         # return year_range
 
-    def __plot_it(self, year_range):
+    def __plot_it(self, metrics=None):
         fig, ax = plt.subplots(figsize=(10, 10))
-        norm = Normalize(vmin=-0.1, vmax=1.1)
+        norm = Normalize(vmin=-0.01, vmax=1.01)
         cax = ax.imshow(self.pixel_classes, norm=norm)
 
         major_ticks = np.arange(0, self.pixel_classes.shape[1] + 1, 1000)
@@ -162,21 +160,21 @@ class ForestHealthClassification:
         ax.grid(which='major', color='white', alpha=0.8)
 
         cbar = fig.colorbar(cax, orientation='vertical')
-        ttl = f'Forest Health prediction based on SG trend({self.clf_name}) {year_range}\n'
+        ttl = f'Forest Health prediction based on SG trend({self.clf_name}) {self.year_range}\n'
         if self.is_discrete:
             ttl += f'Prediction Metrics: %s(accuracy), %s(f1 score)' % (
-                "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["accuracy"],
-                "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["f1 score"])
+                "\'N/A\'" if metrics is None else f"%.2f" % metrics["accuracy"],
+                "\'N/A\'" if metrics is None else f"%.2f" % metrics["f1 score"])
         else:
             ttl += f'Prediction Metrics: %s(MAE), %s(RMSE), %s(R2)' % (
-                "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Mean Absolute Error (MAE)"],
-                "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Root Mean Squared Error (RMSE)"],
-                "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["R-Squared (R2)"])
+                "\'N/A\'" if metrics is None else f"%.2f" % metrics["Mean Absolute Error (MAE)"],
+                "\'N/A\'" if metrics is None else f"%.2f" % metrics["Root Mean Squared Error (RMSE)"],
+                "\'N/A\'" if metrics is None else f"%.2f" % metrics["R-Squared (R2)"])
 
         ax.set_title(ttl)
         return fig
 
-    def __plot_it_7(self, year_range):
+    def __plot_it_7(self, metrics):
         fig, ax = plt.subplots(figsize=(10, 10))
         colors = ['#1E1EFF',  # Aquatic Area
                   '#EF6FFF',  # Strong Growth
@@ -217,17 +215,20 @@ class ForestHealthClassification:
         }
         cbar = fig.colorbar(cax, ticks=list(ticks_dict.keys()), orientation='vertical')
         cbar.ax.set_yticklabels(ticks_dict.values())
-        ttl = (f'Forest Health prediction based on SG trend({self.clf_name}) {year_range}\n' +
+        ttl = (f'Forest Health prediction based on SG trend({self.clf_name}) {self.year_range}\n' +
                f'Prediction Metrics: %s(MAE), %s(RMSE), %s(R2)' % (
-                   "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Mean Absolute Error (MAE)"],
-                   "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["Root Mean Squared Error (RMSE)"],
-                   "\'N/A\'" if self.metrics is None else f"%.2f" % self.metrics["R-Squared (R2)"])
+                   "\'N/A\'" if metrics is None else f"%.2f" % metrics["Mean Absolute Error (MAE)"],
+                   "\'N/A\'" if metrics is None else f"%.2f" % metrics["Root Mean Squared Error (RMSE)"],
+                   "\'N/A\'" if metrics is None else f"%.2f" % metrics["R-Squared (R2)"])
                )
         ax.set_title(ttl)
         return fig
 
-    def plot_it(self):
-        fig = self.__plot_it(self.year_range)
+    def plot_it(self, metrics=None, cls=2):
+        if cls == 2:
+            fig = self.__plot_it(metrics)
+        else:
+            fig = self.__plot_it_7(metrics)
 
         pth = f"{self.rootpath}/predicting/{self.lr_range}_years_range"
         if not os.path.exists(pth):

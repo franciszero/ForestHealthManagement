@@ -59,54 +59,59 @@ class ModelSelection:
 
         # mm_lr = ModelManager(self.sg_values, is_discrete=True)
         # mm_lr.train_lr(is_plot=True)
-
+        # result_lr = mm_lr.results_dic["metrics"]
+        #
         # mm_xgb = ModelManager(self.sg_values)
-        # mm_xgb.train_xgb(is_plot=False)
+        # mm_xgb.train_xgb(is_plot=True)
+        # result_xgb = mm_xgb.results_dic["metrics"]
         #
         # mm_dt = ModelManager(self.sg_values)
-        # mm_dt.train_dt(is_plot=False)
+        # mm_dt.train_dt(is_plot=True)
+        # result_dt = mm_dt.results_dic["metrics"]
 
         # ms_nn1_1 = ModelManager(self.sg_values, is_discrete=True)
         # ms_nn1_1.train_nn(1, (32, 32, 32),
+        #                   (128, 64), (0.3, 0.3),
+        #                   (128, 64), (0.3, 0.3),
+        #                   1, 0.5, 0.002, 0.01, is_plot=True)
+
+        ms_nn4 = ModelManager(self.sg_values)
+        ms_nn4.train_nn(4, (8, 8, 8),
+                        (8, 8), (0.3, 0.3),
+                        (128, 128), (0.3, 0.3),
+                        1, 0.5, 0.001, 0.01, is_plot=True)
+
+        # done
+        # ms_nn2_1 = ModelManager(self.sg_values, is_discrete=True)
+        # ms_nn2_1.train_nn(2, (32, 32, 32),
         #                   (128, 64), (0.6, 0.4),
         #                   (128, 64), (0.6, 0.4),
-        #                   2, 0.5, 0.001, is_plot=True)
-        #
-        # ms_nn1_2 = ModelManager(self.sg_values, is_discrete=True)
-        # ms_nn1_2.train_nn(1, (16, 16, 16),
-        #                   (128, 64), (0.6, 0.4),
-        #                   (128, 64), (0.6, 0.4),
-        #                   2, 0.5, 0.001, is_plot=True)
+        #                   2, 0.5, 0.005, is_plot=True)
 
-        ms_nn2_1 = ModelManager(self.sg_values, is_discrete=True)
-        ms_nn2_1.train_nn(2, (32, 32, 32),
-                          (128, 64), (0.6, 0.4),
-                          (128, 64), (0.6, 0.4),
-                          2, 0.5, 0.001, is_plot=True)
+        # doing
+        # ms_nn2_2 = ModelManager(self.sg_values, is_discrete=True)
+        # ms_nn2_2.train_nn(2, (32, 32, 32),
+        #                   (64, 32), (0.6, 0.4),
+        #                   (64, 64), (0.6, 0.4),
+        #                   2, 0.5, 0.005, is_plot=True)
 
-        ms_nn2_2 = ModelManager(self.sg_values, is_discrete=True)
-        ms_nn2_2.train_nn(2, (32, 32, 32),
-                          (64, 32), (0.6, 0.4),
-                          (64, 64), (0.6, 0.4),
-                          2, 0.5, 0.001, is_plot=True)
+        # ms_nn3_1 = ModelManager(self.sg_values, is_discrete=True)
+        # ms_nn3_1.train_nn(3, (12, 12, 12),
+        #                 (64, 64), (0.6, 0.4),
+        #                 (64, 64), (0.6, 0.4),
+        #                 1, 0.5, 0.2, 0.01, is_plot=True)
 
-        ms_nn3_1 = ModelManager(self.sg_values, is_discrete=True)
-        ms_nn3_1.train_nn(3, (12, 12, 12),
-                        (128, 128), (0.6, 0.4),
-                        (64, 64), (0.6, 0.4),
-                        1, 0.5, 0.001, is_plot=True)
+        # ms_nn3_2 = ModelManager(self.sg_values, is_discrete=True)
+        # ms_nn3_2.train_nn(3, (12, 12, 12),
+        #                 (32, 32), (0.6, 0.4),
+        #                 (64, 64), (0.6, 0.4),
+        #                 1, 0.5, 0.05, is_plot=True)
 
-        ms_nn3_2 = ModelManager(self.sg_values, is_discrete=True)
-        ms_nn3_2.train_nn(3, (12, 12, 12),
-                        (64, 64), (0.6, 0.4),
-                        (64, 64), (0.6, 0.4),
-                        1, 0.5, 0.001, is_plot=True)
-
-        ms_nn3_3 = ModelManager(self.sg_values, is_discrete=True)
-        ms_nn3_3.train_nn(3, (12, 12, 12),
-                        (32, 32), (0.6, 0.4),
-                        (64, 64), (0.6, 0.4),
-                        1, 0.5, 0.001, is_plot=True)
+        # ms_nn3_3 = ModelManager(self.sg_values, is_discrete=True)
+        # ms_nn3_3.train_nn(3, (12, 12, 12),
+        #                 (16, 16), (0.6, 0.4),
+        #                 (64, 64), (0.6, 0.4),
+        #                 1, 0.5, 0.05, is_plot=True)
 
         # self.foo(ms_nn2_2)
 

@@ -16,12 +16,12 @@ from scipy.stats import linregress
 from scipy.stats import t
 from scipy.interpolate import UnivariateSpline
 import seaborn as sns
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, mean_absolute_error, mean_squared_error, r2_score, classification_report, \
+    f1_score, accuracy_score
 from sklearn.linear_model import LinearRegression, Lasso, Ridge, LogisticRegression
 from sklearn.svm import SVR
-from sklearn.tree import DecisionTreeRegressor
+from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
 from sklearn.ensemble import RandomForestRegressor, VotingRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, confusion_matrix, classification_report
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.utils import compute_class_weight
@@ -53,83 +53,90 @@ from src.SpatialPyramidPooling import SpatialPyramidPooling
 class ModelManager:
     def __init__(self, sg_values, time_steps=14,
                  train_xy=(0, 800), train_hw=(2000, 2000),
-                 val_xy=(0, 800), val_hw=(2000, 2000),
-                 test_xy=(0, 2800), test_hw=(2000, 2000), is_discrete=True, scale=False):
+                 val_xy=(0, 2800), val_hw=(2000, 2000),
+                 test_xy=(2000, 1800), test_hw=(2000, 2000), is_discrete=True, scale=False):
         self.sg_values = np.where(sg_values[:, :, :] < 0, 0, sg_values[:, :, :])
         self.is_discrete = is_discrete
         self.years = np.load('sg_trend_yearly_range.npy')
-        self.scaler1 = StandardScaler()
-        self.o = 1
+        self.test_offset = 1
         self.time_steps = time_steps
         self.train_xy, self.train_hw = train_xy, train_hw
         self.val_xy, self.val_hw = val_xy, val_hw
         self.test_xy, self.test_hw = test_xy, test_hw
 
-        h1, w1 = train_xy
-        h2, w2 = h1 + train_hw[0], w1 + train_hw[1]
-        self.X_train = self.sg_values[0:time_steps, h1:h2, w1:w2].reshape(time_steps, -1).T
-        if scale:
-            self.X_train = self.scaler1.fit_transform(self.X_train)
-        self.y_train = self.sg_values[time_steps, h1:h2, w1:w2].flatten()
-        self.year_range_train = self.years[0:time_steps + 1]
+        #  X, y, years, clf, scaler
+        self.X_train, self.y_train, self.train_years, self.train_clf, scaler = self._get_xy(
+            "Input_ML", "Training_Data", train_xy, train_hw, 0,
+            scaling=False, scaler=None,
+            is_discrete=True, is_plot=False)
 
-        h1, w1 = test_xy
-        h2, w2 = h1 + test_hw[0], w1 + test_hw[1]
-        self.X_test = self.sg_values[self.o:time_steps + self.o, h1:h2, w1:w2].reshape(time_steps, -1).T
-        if scale:
-            self.X_test = self.scaler1.transform(self.X_test)
-        self.y_test = self.sg_values[time_steps + self.o, h1:h2, w1:w2].flatten()
-        self.r_test = self.years[self.o:time_steps + self.o + 1]
-        self.d_test = self.sg_values[self.o:time_steps + self.o + 1, h1:h2, w1:w2]
+        self.X_val, self.y_val, self.val_years, self.val_clf = None, None, None, None
 
-        if is_discrete:
-            # discrete
-            clf_ground_truth = self.FH_clf("Ground Truth", self.y_train, None)
-            self.y_train = clf_ground_truth.pixel_classes
-            clf_prediction = self.FH_clf("", self.y_test, None)
-            self.y_test = clf_prediction.pixel_classes
-
-        self.scaler2 = StandardScaler()
-        h1, w1 = 600, 3600
-        h2, w2 = h1 + 200, w1 + 200
-        self.X_train_svr = self.sg_values[0:time_steps, h1:h2, w1:w2].reshape(time_steps, -1).T
-        if scale:
-            self.X_train_svr = self.scaler2.fit_transform(self.X_train_svr)
-        self.y_train_svr = self.sg_values[time_steps, h1:h2, w1:w2].flatten()
-
-        h1, w1 = test_xy
-        h2, w2 = h1 + test_hw[0], w1 + test_hw[1]
-        self.X_test_svr = self.sg_values[self.o:time_steps + self.o, h1:h2, w1:w2].reshape(time_steps, -1).T
-        if scale:
-            self.X_test_svr = self.scaler2.transform(self.X_test_svr)
-        self.y_test_svr = self.sg_values[time_steps + self.o, h1:h2, w1:w2].flatten()
+        self.X_test, self.y_test, self.test_years, self.test_clf, _ = self._get_xy(
+            "Input_ML", "Ground_Truth", test_xy, test_hw, self.test_offset,
+            scaling=False, scaler=scaler,
+            is_discrete=True, is_plot=False)
 
         self.results_dic = None
         return
+
+    def _get_xy(self, purpose, name, xy, hw, offset, scaling=False, scaler=None, is_discrete=True, is_plot=False):
+        h1, w1 = xy
+        h2, w2 = h1 + hw[0], w1 + hw[1]
+        X = self.sg_values[offset:self.time_steps + offset, h1:h2, w1:w2].reshape(self.time_steps, -1).T
+        if scaling:
+            if scaler is None:
+                scaler = StandardScaler()
+                X = scaler.fit_transform(X)
+            else:
+                X = scaler.transform(X)
+        y = self.sg_values[self.time_steps + offset, h1:h2, w1:w2].reshape(1, -1)
+        years = self.years[offset:self.time_steps + offset]
+        clf = None
+        if is_discrete:
+            clf = self.__discrete_y(name, X, y, hw, years, is_plot=is_plot)
+            y = clf.pixel_classes.reshape(1, -1)
+        if purpose == "Input_NN":
+            X = X.T.reshape(self.time_steps, hw[0], hw[1]).reshape((1, self.time_steps, hw[0], hw[1], 1))
+        return X, y, years, clf, scaler
+
+    def __discrete_y(self, name, X, y, hw, years, is_plot=False):
+        sg_vals = np.concatenate([X, y.reshape(-1, 1)], axis=1).T.reshape(-1, hw[0], hw[1])
+        clf = ForestHealthClassification(name, sg_vals, years, is_discrete=self.is_discrete)
+        clf.linear_regress()
+        clf.classify_pixels_33()
+        clf.plot_it(cls=7)
+        clf.plot_it()
+        clf.classify_pixels()
+        if is_plot:
+            clf.plot_it()
+        return clf
 
     def __getitem__(self, item):
         return self.results_dic[item]
 
     def train_nn(self, idx, conv_filters, rnn_units, rnn_dropouts, dense_units, dense_drop,
-                 flatten_type, threshold, learning_rate, is_plot=False):
+                 flatten_type, threshold, learning_rate, l2_reg, is_plot=False):
         h, w = self.train_hw
 
         if idx in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
-            X_train, X_val, X_test, y_train, y_val, y_test = self.train_test_gen1(h, w, scaling=False)
+            self.train_test_gen1(scaling=False)
             if idx == 1:
                 name, weight_file, model = self.nn1(idx, h, w, conv_filters,
                                                     rnn_units, rnn_dropouts,
-                                                    dense_units, dense_drop, flatten_type, learning_rate)
+                                                    dense_units, dense_drop, flatten_type, learning_rate, l2_reg=l2_reg)
             elif idx == 2:
                 name, weight_file, model = self.nn2(idx, h, w, conv_filters,
                                                     rnn_units, rnn_dropouts,
-                                                    dense_units, dense_drop, flatten_type, learning_rate)
+                                                    dense_units, dense_drop, flatten_type, learning_rate, l2_reg=l2_reg)
             elif idx == 3:
                 name, weight_file, model = self.nn3(idx, h, w, conv_filters,
                                                     rnn_units, rnn_dropouts,
-                                                    dense_units, dense_drop, flatten_type, learning_rate)
+                                                    dense_units, dense_drop, flatten_type, learning_rate, l2_reg=l2_reg)
             elif idx == 4:
-                name, weight_file, model = self.nn4(h, w)
+                name, weight_file, model = self.nn4(idx, h, w, conv_filters,
+                                                    rnn_units, rnn_dropouts,
+                                                    dense_units, dense_drop, flatten_type, learning_rate, l2_reg=l2_reg)
             elif idx == 5:
                 name, weight_file, model = self.nn5(h, w)
             else:
@@ -145,83 +152,84 @@ class ModelManager:
         except (ImportError, IOError):
             print(f"No saved model found: {weight_file}. Starting fresh training.")
 
-        # early stop & check point
-        callbacks = [
-            EarlyStopping(monitor='val_loss', patience=15),
-            ModelCheckpoint(
-                weight_file,
-                monitor='val_loss',
-                verbose=2,
-                save_best_only=True,
-                mode='min',
-                save_freq='epoch'
-            )
-        ]
+            # early stop & check point
+            callbacks = [
+                EarlyStopping(monitor='val_loss', patience=5),
+                ModelCheckpoint(
+                    weight_file,
+                    monitor='val_loss',
+                    verbose=2,
+                    save_best_only=True,
+                    mode='min',
+                    save_freq='epoch'
+                )
+            ]
 
-        # training
-        history = model.fit(
-            X_train, y_train,
-            epochs=10000,
-            batch_size=1,
-            validation_data=(X_val, y_val),
-            verbose=2,
-            callbacks=callbacks
-        )
-        model.save(weight_file)
-        self.training_performance_plot(history, weight_file.split(".", 1)[0])
+            # training
+            history = model.fit(
+                self.X_train, self.y_train,
+                epochs=10000,
+                batch_size=1,
+                validation_data=(self.X_val, self.y_val),
+                verbose=2,
+                callbacks=callbacks
+            )
+            model.save(weight_file)
+            self.training_performance_plot(history, weight_file.split(".", 1)[0])
 
         # eval
-        loss = model.evaluate(X_test, y_test)
+        loss = model.evaluate(self.X_test, self.y_test)
         print(f"Test Loss: {loss}")
 
-        y_pred, metrics = self.__nn_eval(model, X_test, y_test, threshold)
+        # Predict and evaluate
+        y_pred = model.predict(self.X_test)
         # self.train_test_data_dist(y_pred)
+        y_pred = (y_pred >= threshold).astype(int)
+        metrics = self._model_eval(self.y_test, y_pred)
 
-        clf_ground_truth, clf_prediction = self.save_info(name, y_pred, metrics, model)
-        clf_ground_truth.pixel_classes = y_test.reshape(self.test_hw[0],self.test_hw[1])
-        clf_prediction.pixel_classes = (y_pred >= threshold).astype(int).reshape(self.test_hw[0],self.test_hw[1])
+        self.save_model_info_dic(name, y_pred, metrics, model)
         if is_plot:
-            self.FH_clf_visualization(name, clf_ground_truth, clf_prediction, threshold)
+            self.FH_clf_visualization(name)
 
         return
 
-    def __nn_eval(self, model, X_test, y_test, threshold):
-        # Predict and evaluate
-        y_pred = model.predict(X_test)
-
-        if self.is_discrete:
-            y_pred_class = (y_pred >= threshold).astype(int)
-            cm = confusion_matrix(y_test.flatten(), y_pred_class.flatten())
-            [[tn, fp], [fn, tp]] = cm
-            tpr = tp/(tp+fn)  # True Positive Rate (TPR) or Sensitivity
-            tnr = tn/(tn+fp)  # True Negative Rate (TNR) or Specificity
-            ppv = tp/(tp+fp)  # Precision or Positive Predictive Value (PPV)
-            npv = tn/(tn+fn)  # Negative Predictive Value (NPV)
-            fpr = fp/(fp+tn)  # False Positive Rate (FPR)
-            fnr = fn/(tp+fn)  # False Negative Rate (FNR)
-            acc = (tp+tn)/(tp+tn+fp+fn)  # accuracy
-            f1 = 2*ppv*tpr/(ppv+tpr)  # f1 score
-
-            metrics = {
-                'accuracy': acc,
-                'f1 score': f1
-            }
-        else:
-            # Formatting and printing the results
-            metrics = {
-                'Mean Absolute Error (MAE)': mean_absolute_error(y_test, y_pred),
-                'Mean Squared Error (MSE)': mean_squared_error(y_test, y_pred),
-                'Root Mean Squared Error (RMSE)': mean_squared_error(y_test, y_pred, squared=False),
-                'R-Squared (R2)': r2_score(y_test, y_pred)
-            }
-
-        print("Model Evaluation Metrics:")
-        print("----------------------------")
-        for metric, value in metrics.items():
-            print(f"{metric}: {value:.4f}")
-        print("----------------------------")
-
-        return y_pred, metrics
+    # def __nn_eval(self, model, X_test, y_test, threshold):
+    #     # Predict and evaluate
+    #     y_pred = model.predict(X_test)
+    #
+    #     if self.is_discrete:
+    #         y_pred_class = (y_pred >= threshold).astype(int)
+    #         cm = confusion_matrix(y_test.flatten(), y_pred_class.flatten())
+    #         [[tn, fp], [fn, tp]] = cm
+    #         tpr = tp / (tp + fn)  # True Positive Rate (TPR) or Sensitivity
+    #         tnr = tn / (tn + fp)  # True Negative Rate (TNR) or Specificity
+    #         ppv = tp / (tp + fp)  # Precision or Positive Predictive Value (PPV)
+    #         npv = tn / (tn + fn)  # Negative Predictive Value (NPV)
+    #         fpr = fp / (fp + tn)  # False Positive Rate (FPR)
+    #         fnr = fn / (tp + fn)  # False Negative Rate (FNR)
+    #         acc = (tp + tn) / (tp + tn + fp + fn)  # accuracy
+    #         f1 = 2 * ppv * tpr / (ppv + tpr)  # f1 score
+    #
+    #         metrics = {
+    #             'accuracy': acc,
+    #             'f1 score': f1
+    #         }
+    #     else:
+    #         # Formatting and printing the results
+    #         metrics = {
+    #             'Mean Absolute Error (MAE)': mean_absolute_error(y_test, y_pred),
+    #             'Mean Squared Error (MSE)': mean_squared_error(y_test, y_pred),
+    #             'Root Mean Squared Error (RMSE)': mean_squared_error(y_test, y_pred, squared=False),
+    #             'R-Squared (R2)': r2_score(y_test, y_pred)
+    #         }
+    #
+    #     print("Model Evaluation Metrics:")
+    #     print("----------------------------")
+    #     for metric, value in metrics.items():
+    #         print(f"{metric}: {value:.4f}")
+    #     print("----------------------------")
+    #
+    #     return y_pred, metrics
 
     @staticmethod
     def train_test_data_dist(ds):
@@ -231,46 +239,36 @@ class ModelManager:
         plt.ylabel('Frequency')
         plt.show()
 
-    def train_test_gen1(self, h, w, scaling=False):
-        scaler = StandardScaler()
-        h1, w1 = self.train_xy
-        h2, w2 = h1 + h, w1 + w
-        X_train = self.sg_values[0:self.time_steps, h1:h2, w1:w2].reshape(self.time_steps, -1).T
-        if scaling:
-            X_train = scaler.fit_transform(X_train)
-        X_train = X_train.reshape(-1, self.time_steps, h, w, 1)
-        y_train = self.sg_values[self.time_steps, h1:h2, w1:w2].reshape(1, -1)
+    def train_test_gen1(self, scaling=False):
+        print(self.sg_values[:, self.train_xy[0], self.train_xy[1]])
 
-        h1, w1 = self.val_xy
-        h2, w2 = h1 + h, w1 + w
-        X_val = self.sg_values[1:self.time_steps + 1, h1:h2, w1:w2].reshape(self.time_steps, -1).T
-        if scaling:
-            X_val = scaler.transform(X_val)
-        X_val = X_val.reshape(-1, self.time_steps, h, w, 1)
-        y_val = self.sg_values[self.time_steps + 1, h1:h2, w1:w2].reshape(1, -1)
+        purpose = "Input_NN"
+        self.X_train, self.y_train, self.train_years, self.train_clf, scaler = self._get_xy(
+            purpose, "Training_Data", self.train_xy, self.train_hw, 0,
+            scaling=scaling, scaler=None,
+            is_discrete=True, is_plot=False)
+        print(self.X_train[0, :, 0, 0, 0])
 
-        h1, w1 = self.test_hw
-        h2, w2 = h1 + h, w1 + w
-        X_test = self.sg_values[1:self.time_steps + 1, h1:h2, w1:w2].reshape(self.time_steps, -1).T
-        if scaling:
-            X_test = scaler.transform(X_test)
-        X_test = X_test.reshape(-1, self.time_steps, h, w, 1)
-        y_test = self.sg_values[self.time_steps + 1, h1:h2, w1:w2].reshape(1, -1)
+        self.X_val, self.y_val, self.val_years, self.val_clf, scaler = self._get_xy(
+            purpose, "Validation_data", self.val_xy, self.val_hw, self.test_offset,
+            scaling=scaling, scaler=scaler,
+            is_discrete=True, is_plot=False)
+        print(self.X_val[0, :, 0, 0, 0])
 
-        if self.is_discrete:
-            # discrete
-            y_train = self.FH_clf("Ground Truth", y_train.flatten(), None).pixel_classes.reshape(1, -1)
-            y_val = self.FH_clf("", y_val.flatten(), None).pixel_classes.reshape(1, -1)
-            y_test = self.FH_clf("", y_test.flatten(), None).pixel_classes.reshape(1, -1)
+        self.X_test, self.y_test, self.test_years, self.test_clf, _ = self._get_xy(
+            purpose, "Ground_Truth", self.test_xy, self.test_hw, self.test_offset,
+            scaling=scaling, scaler=scaler,
+            is_discrete=True, is_plot=False)
+        print(self.X_test[0, :, 0, 0, 0])
 
-        print("X_train.shape = ", X_train.shape)
-        print("y_train.shape = ", y_train.shape)
-        print("X_val.shape = ", X_val.shape)
-        print("y_val.shape = ", y_val.shape)
-        print("X_test.shape = ", X_test.shape)
-        print("y_test.shape = ", y_test.shape)
+        print("X_train.shape = ", self.X_train.shape)
+        print("X_val.shape = ", self.X_val.shape)
+        print("X_test.shape = ", self.X_test.shape)
+        print("y_train.shape = ", self.y_train.shape)
+        print("y_val.shape = ", self.y_val.shape)
+        print("y_test.shape = ", self.y_test.shape)
 
-        return X_train, X_val, X_test, y_train, y_val, y_test
+        return
 
     def nn3(self, idx, h, w, conv_filters,
             convlstm_units, convlstm_dropouts,
@@ -284,7 +282,8 @@ class ModelManager:
         u2_str = "-".join(["U2"] + [f"{x:d}".replace('.', '_') for x in dense_units])
         d2_str = "-".join(["D2"] + [f"{x:.2f}".replace('.', '_') for x in dense_drop])
         flat_str = f"FLAT-{flatten_layer}"
-        name = f"Model{idx}__{model_type}__{filter_str}__{u1_str}__{d1_str}__{u2_str}__{d2_str}__{flat_str}"
+        lr_str = f"LR-{learning_rate}"
+        name = f"Model{idx}__{model_type}__{filter_str}__{u1_str}__{d1_str}__{u2_str}__{d2_str}__{flat_str}__{lr_str}"
         weight_file = f'Best_{name}.h5'
 
         input_layer = Input(shape=(self.time_steps, h, w, 1))
@@ -346,7 +345,8 @@ class ModelManager:
         u2_str = "-".join(["U2"] + [f"{x:d}".replace('.', '_') for x in dense_units])
         d2_str = "-".join(["D2"] + [f"{x:.2f}".replace('.', '_') for x in dense_drop])
         flat_str = f"FLAT-{flatten_layer}"
-        name = f"Model{idx}__{model_type}__{filter_str}__{u1_str}__{d1_str}__{u2_str}__{d2_str}__{flat_str}"
+        lr_str = f"LR-{learning_rate}"
+        name = f"Model{idx}__{model_type}__{filter_str}__{u1_str}__{d1_str}__{u2_str}__{d2_str}__{flat_str}__{lr_str}"
         weight_file = f'Best_{name}.h5'
 
         input_layer = Input(shape=(self.time_steps, h, w, 1))
@@ -408,6 +408,57 @@ class ModelManager:
 
         return name, weight_file, model
 
+    def nn4(self, idx, h, w, conv_filters,
+            lstm_units, lstm_dropouts,
+            dense_units, dense_drop,
+            flatten_layer, learning_rate, l2_reg=0.001
+            ):
+        name = f"Simple_Model"
+        weight_file = f'Best_{name}.h5'
+
+        input_layer = Input(shape=(self.time_steps, h, w, 1))
+
+        f1, f2, f3 = conv_filters
+        x = TimeDistributed(Conv2D(filters=f1, kernel_size=(3, 3), padding='same', dilation_rate=2,
+                                   kernel_regularizer=l2(l2_reg)))(input_layer)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
+        x = TimeDistributed(Conv2D(filters=f2, kernel_size=(3, 3), padding='same', activation='relu',
+                                   kernel_regularizer=l2(l2_reg)))(x)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation('relu'))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(2, 2)))(x)
+
+        if flatten_layer == 1:
+            x = TimeDistributed(Flatten())(x)
+        else:
+            x = TimeDistributed(GlobalAveragePooling2D())(x)
+
+        u1, u2 = lstm_units
+        d1, d2 = lstm_dropouts
+        x = LSTM(units=u1, activation='relu', kernel_regularizer=l2(l2_reg), return_sequences=True)(x)
+        x = Dropout(d1)(x)
+        x = LSTM(units=u2, activation='relu', kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(d2)(x)
+
+        # Output layer
+        du1, du2 = dense_units
+        dd1, dd2 = dense_drop
+        x = Dense(du1, activation='relu', kernel_regularizer=l2(l2_reg))(x)
+        x = Dropout(dd1)(x)
+        # x = Dense(du2, activation='relu', kernel_regularizer=l2(l2_reg))(x)
+        # x = Dropout(dd2)(x)
+        output = Dense(units=h * w, activation='sigmoid')(x)
+
+        model = Model(inputs=input_layer, outputs=output, name=name)
+        model.compile(optimizer=Adam(lr=learning_rate),
+                      loss='binary_crossentropy',
+                      metrics=[Precision(), Recall()])
+        model.summary()
+
+        return name, weight_file, model
+
     def nn1(self, idx, h, w, conv_filters,
             lstm_units, lstm_dropouts,
             dense_units, dense_drop,
@@ -420,7 +471,8 @@ class ModelManager:
         u2_str = "-".join(["U2"] + [f"{x:d}".replace('.', '_') for x in dense_units])
         d2_str = "-".join(["D2"] + [f"{x:.2f}".replace('.', '_') for x in dense_drop])
         flat_str = f"FLAT-{flatten_layer}"
-        name = f"Model{idx}__{model_type}__{filter_str}__{u1_str}__{d1_str}__{u2_str}__{d2_str}__{flat_str}"
+        lr_str = f"LR-{str(learning_rate).replace('.', '_')}"
+        name = f"Model{idx}__{model_type}__{filter_str}__{u1_str}__{d1_str}__{u2_str}__{d2_str}__{flat_str}__{lr_str}"
         weight_file = f'Best_{name}.h5'
 
         input_layer = Input(shape=(self.time_steps, h, w, 1))
@@ -440,21 +492,23 @@ class ModelManager:
             x = TimeDistributed(Activation('relu'))(x)
         x = Add()([x, previous_block_activation])
 
-        x = TimeDistributed(Conv2D(filters=f3, kernel_size=(7, 7), padding='same', dilation_rate=2,
+        x = TimeDistributed(Conv2D(filters=f3, kernel_size=(3, 3), padding='same', dilation_rate=2,
                                    kernel_regularizer=l2(l2_reg)))(x)
         x = TimeDistributed(BatchNormalization())(x)
         x = TimeDistributed(Activation('relu'))(x)
-        x = TimeDistributed(MaxPooling2D(pool_size=(5, 5)))(x)
+        x = TimeDistributed(MaxPooling2D(pool_size=(3, 3)))(x)
 
-        # Global Average Pooling
-        x = TimeDistributed(GlobalAveragePooling2D())(x)
+        if flatten_layer == 1:
+            x = TimeDistributed(Flatten())(x)
+        else:
+            x = TimeDistributed(GlobalAveragePooling2D())(x)
 
         u1, u2 = lstm_units
         d1, d2 = lstm_dropouts
         x = LSTM(units=u1, activation='relu', kernel_regularizer=l2(l2_reg), return_sequences=True)(x)
         x = Dropout(d1)(x)
         x = SeqSelfAttention(attention_activation='softmax')(x)
-        x = LSTM(units=u2, activation='relu', kernel_regularizer=l2(l2_reg), return_sequences=True)(x)
+        x = LSTM(units=u2, activation='relu', kernel_regularizer=l2(l2_reg))(x)
         x = Dropout(d2)(x)
 
         # Output layer
@@ -491,24 +545,15 @@ class ModelManager:
         plt.close(fig)
         return
 
-    def save_info(self, name, y_pred, metrics, model):
-        clf_ground_truth, clf_prediction = self.sg_values_discrete(name, y_pred, metrics)
-        y_true_label, y_pred_label = self.get_y_labels(clf_ground_truth, clf_prediction)
+    def save_model_info_dic(self, name, y_pred, metrics, model):
         self.results_dic = {
             'name': name,
             'y_test': self.y_test,
-            'y_test_label': self.y_test.flatten() if self.is_discrete else y_true_label,
-            'y_pred': y_pred,
-            'y_pred_label': y_pred if self.is_discrete else y_pred_label,
+            'y_pred': y_pred.reshape(self.test_hw[0], self.test_hw[1]),
             'metrics': metrics,
             'model': model
         }
-        return clf_ground_truth, clf_prediction
-
-    def get_y_labels(self, clf_gt, clf_pred):
-        y_true = clf_gt.pixel_classes.flatten()
-        y_pred = clf_pred.pixel_classes.flatten()
-        return y_true, y_pred
+        pass
 
     def sg_values_discrete(self, name, y_pred, metrics):
         clf_ground_truth = self.FH_clf("Ground Truth", self.y_test, None)
@@ -521,18 +566,21 @@ class ModelManager:
         if self.is_discrete:
             model = LogisticRegression()
         else:
-            model = LogisticRegression()
+            model = LinearRegression()
 
         y_pred, metrics = self.__train(model, f'Best_Model__{name}.pkl')
-        clf_ground_truth, clf_prediction = self.save_info(name, y_pred, metrics, model)
+        self.save_model_info_dic(name, y_pred, metrics, model)
         if is_plot:
-            self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
+            self.FH_clf_visualization(name)
         return
 
     def train_xgb(self, is_plot=False):
         name = "XGBoost"
         self.__print_header(name)
-        model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100, learning_rate=0.1, max_depth=5)
+        if self.is_discrete:
+            model = xgb.XGBClassifier(objective='binary:logistic', n_estimators=100, learning_rate=0.1, max_depth=5)
+        else:
+            model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100, learning_rate=0.1, max_depth=5)
         param_grid = {
             'n_estimators': [15, 35, 100],
             'learning_rate': [0.01, 0.1, 0.2],
@@ -542,16 +590,19 @@ class ModelManager:
         }
         model = RandomizedSearchCV(model, param_grid, cv=5, verbose=2)
         y_pred, metrics = self.__train(model, f'Best_Model__{name}.pkl')
-        # print("model best params: ", model.best_params_)
-        clf_ground_truth, clf_prediction = self.save_info(name, y_pred, metrics, model)
+        self.save_model_info_dic(name, y_pred, metrics, model)
         if is_plot:
-            self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
+            self.FH_clf_visualization(name)
         return
 
     def train_dt(self, is_plot=False):
         name = 'Decision Tree'
         self.__print_header(name)
-        model = DecisionTreeRegressor()
+
+        if self.is_discrete:
+            model = DecisionTreeClassifier()
+        else:
+            model = DecisionTreeRegressor()
         param_grid = {
             'max_depth': [None, 10, 20],
             'min_samples_split': [2, 10],
@@ -559,75 +610,67 @@ class ModelManager:
         }
         model = RandomizedSearchCV(model, param_grid, cv=5, verbose=2)
         y_pred, metrics = self.__train(model, f'Best_Model__{name}.pkl')
-        # print("model best params: ", model.best_params_)
-        clf_ground_truth, clf_prediction = self.save_info(name, y_pred, metrics, model)
+        self.save_model_info_dic(name, y_pred, metrics, model)
         if is_plot:
-            self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
+            self.FH_clf_visualization(name)
         return
 
-    def train_svr(self, is_plot=False):
-        name = "SVM Regression"
-        self.__print_header(name)
-        model = SVR(kernel='linear')
-        param_grid = {
-            'C': [0.01, 0.1, 1, 10],
-            'gamma': ['scale', 'auto']
-        }
-        model = RandomizedSearchCV(model, param_grid, cv=5, verbose=2)
-        model.fit(self.X_train_svr, self.y_train_svr)
-        y_pred = model.predict(self.X_test_svr)
-        metrics = self.__model_eval(self.y_test_svr, y_pred)
-        # print("model best params: ", model.best_params_)
-        clf_ground_truth, clf_prediction = self.save_info(name, y_pred, metrics, model)
-        if is_plot:
-            self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
-        return
+    # def train_svr(self, is_plot=False):
+    #     name = "SVM Regression"
+    #     self.__print_header(name)
+    #     model = SVR(kernel='linear')
+    #     param_grid = {
+    #         'C': [0.01, 0.1, 1, 10],
+    #         'gamma': ['scale', 'auto']
+    #     }
+    #     model = RandomizedSearchCV(model, param_grid, cv=5, verbose=2)
+    #     model.fit(self.X_train_svr, self.y_train_svr)
+    #     y_pred = model.predict(self.X_test_svr)
+    #     metrics = self.__model_eval(self.y_test_svr, y_pred)
+    #     # print("model best params: ", model.best_params_)
+    #     clf_ground_truth, clf_prediction = self.save_model_info_dic(name, y_pred, metrics, model)
+    #     if is_plot:
+    #         self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
+    #     return
 
-    def train_rf(self, is_plot=False):
-        name = 'Random Forest'
-        self.__print_header(name)
-        model = RandomForestRegressor()
-        param_grid = {
-            'n_estimators': [15, 45],
-            'max_depth': [None, 10, 20],
-            'min_samples_split': [2, 10],
-            'min_samples_leaf': [1, 4]
-        }
-        model = RandomizedSearchCV(model, param_grid, cv=5, verbose=2)
-        y_pred, metrics = self.__train(model, f'Best_Model__{name}.pkl')
-        # print("model best params: ", model.best_params_)
-        clf_ground_truth, clf_prediction = self.save_info(name, y_pred, metrics, model)
-        if is_plot:
-            self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
-        return
+    # def train_rf(self, is_plot=False):
+    #     name = 'Random Forest'
+    #     self.__print_header(name)
+    #     model = RandomForestRegressor()
+    #     param_grid = {
+    #         'n_estimators': [15, 45],
+    #         'max_depth': [None, 10, 20],
+    #         'min_samples_split': [2, 10],
+    #         'min_samples_leaf': [1, 4]
+    #     }
+    #     model = RandomizedSearchCV(model, param_grid, cv=5, verbose=2)
+    #     y_pred, metrics = self.__train(model, f'Best_Model__{name}.pkl')
+    #     # print("model best params: ", model.best_params_)
+    #     clf_ground_truth, clf_prediction = self.save_model_info_dic(name, y_pred, metrics, model)
+    #     if is_plot:
+    #         self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
+    #     return
 
-    def train_ensemble_model(self, models, is_plot=False):
-        name = 'Ensemble Model'
-        self.__print_header(name)
-        model = VotingRegressor(models)
-        y_pred, metrics = self.__train(model, f'Best_Model__{name}.pkl')
-        clf_ground_truth, clf_prediction = self.save_info(name, y_pred, metrics, model)
-        if is_plot:
-            self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
-        return
+    # def train_ensemble_model(self, models, is_plot=False):
+    #     name = 'Ensemble Model'
+    #     self.__print_header(name)
+    #     model = VotingRegressor(models)
+    #     y_pred, metrics = self.__train(model, f'Best_Model__{name}.pkl')
+    #     clf_ground_truth, clf_prediction = self.save_model_info_dic(name, y_pred, metrics, model)
+    #     if is_plot:
+    #         self.FH_clf_visualization(name, clf_ground_truth, clf_prediction)
+    #     return
 
     def __train(self, model, model_name):
-        if self.is_discrete:
-            y_train = self.y_train.flatten()
-            y_test = self.y_test.flatten()
-        else:
-            y_train = self.y_train
-            y_test = self.y_test
-
         try:
             model = joblib.load(model_name)
             print(f"Load model from {model_name}.")
         except (ImportError, IOError):
             print(f"No saved model found: {model_name}. Starting fresh training.")
-            model.fit(self.X_train, y_train)
+            model.fit(self.X_train, self.y_train.flatten())
             joblib.dump(model, model_name)
         y_pred = model.predict(self.X_test)
-        metrics = self.__model_eval(y_test, y_pred)
+        metrics = self._model_eval(self.y_test.flatten(), y_pred)
         return y_pred, metrics
 
     @staticmethod
@@ -636,34 +679,32 @@ class ModelManager:
         print(name, "Model Evaluation Metrics:")
         print("----------------------------")
 
-    def __model_eval(self, y_test, y_pred):
-        if self.is_discrete:
-            cm = confusion_matrix(y_test, y_pred)
-            [[tn, fp], [fn, tp]] = cm
-            tpr = tp/(tp+fn)  # True Positive Rate (TPR) or Sensitivity
-            tnr = tn/(tn+fp)  # True Negative Rate (TNR) or Specificity
-            ppv = tp/(tp+fp)  # Precision or Positive Predictive Value (PPV)
-            npv = tn/(tn+fn)  # Negative Predictive Value (NPV)
-            fpr = fp/(fp+tn)  # False Positive Rate (FPR)
-            fnr = fn/(tp+fn)  # False Negative Rate (FNR)
-            acc = (tp+tn)/(tp+tn+fp+fn)  # accuracy
-            f1 = 2*ppv*tpr/(ppv+tpr)  # f1 score
+    @staticmethod
+    def explain_confusion_matrix(cm):
+        [[tn, fp], [fn, tp]] = cm
+        tpr = tp / (tp + fn)  # True Positive Rate (TPR) or Sensitivity
+        tnr = tn / (tn + fp)  # True Negative Rate (TNR) or Specificity
+        ppv = tp / (tp + fp)  # Precision or Positive Predictive Value (PPV)
+        npv = tn / (tn + fn)  # Negative Predictive Value (NPV)
+        fpr = fp / (fp + tn)  # False Positive Rate (FPR)
+        fnr = fn / (tp + fn)  # False Negative Rate (FNR)
+        acc = (tp + tn) / (tp + tn + fp + fn)  # accuracy
+        f1 = 2 * ppv * tpr / (ppv + tpr)  # f1 score
+        return
 
+    def _model_eval(self, y_test, y_pred):
+        if self.is_discrete:
             metrics = {
-                'accuracy': acc,
-                'f1 score': f1
+                'accuracy': accuracy_score(y_test.flatten(), y_pred.flatten()),
+                'f1 score': f1_score(y_test.flatten(), y_pred.flatten())
             }
         else:
-            # Metrics
-            mae = mean_absolute_error(y_test, y_pred)
             mse = mean_squared_error(y_test, y_pred)
-            rmse = np.sqrt(mse)
-            r2 = r2_score(y_test, y_pred)
             metrics = {
-                'Mean Absolute Error (MAE)': mae,
+                'Mean Absolute Error (MAE)': mean_absolute_error(y_test, y_pred),
                 'Mean Squared Error (MSE)': mse,
-                'Root Mean Squared Error (RMSE)': rmse,
-                'R-Squared (R2)': r2
+                'Root Mean Squared Error (RMSE)': np.sqrt(mse),
+                'R-Squared (R2)': r2_score(y_test, y_pred)
             }
 
         print("----------------------------")
@@ -680,22 +721,26 @@ class ModelManager:
         print(f"run time: {hours:02}:{minutes:02}:{seconds:02}")
         return
 
-    def FH_clf(self, clf_name, y, metrics, lr_range=10):
-        d_pred = self.d_test.copy()
-        d_pred[-1] = y.reshape(self.test_hw[0], self.test_hw[1])
-        clf = ForestHealthClassification(clf_name, d_pred, metrics, self.r_test, self.is_discrete, lr_range=lr_range)
-        clf.linear_regress()
-        clf.classify_pixels()
-        return clf
+    # def FH_clf(self, clf_name, y, metrics, lr_range=10):
+    #     d_pred = self.d_test.copy()
+    #     d_pred[-1] = y.reshape(self.test_hw[0], self.test_hw[1])
+    #     clf = ForestHealthClassification(clf_name, d_pred, metrics, self.r_test, self.is_discrete, lr_range=lr_range)
+    #     clf.linear_regress()
+    #     clf.classify_pixels()
+    #     return clf
 
-    def FH_clf_visualization(self, name, clf_gt, clf_pred, threshold):
-        fig1 = clf_gt.plot_it()
-        fig2 = clf_pred.plot_it()
+    def FH_clf_visualization(self, name, threshold=None):
+        # display ground truth
+        fig1 = self.test_clf.plot_it(metrics=None)
+        # display prediction
+        self.test_clf.clf_name = name
+        self.test_clf.pixel_classes = self.results_dic["y_pred"]
+        fig2 = self.test_clf.plot_it(self.results_dic["metrics"])
 
-        cls_true = clf_gt.pixel_classes.flatten()
-        cls_pred = clf_pred.pixel_classes.flatten()
+        cls_true = self.results_dic["y_test"].flatten()
+        cls_pred = self.results_dic["y_pred"].flatten()
         cm = confusion_matrix(cls_true, cls_pred)
-        fig3 = self.FH_clf_acc(name, clf_pred, cm)
+        fig3 = self.FH_clf_acc(name, self.test_clf, cm)
 
         # Create a single figure with subplots
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
@@ -711,14 +756,15 @@ class ModelManager:
             for spine in ax.spines.values():
                 spine.set_visible(False)  # remove the spines
 
-        fig.suptitle(f'Forest Health Prediction and Accuracy ({clf_pred.clf_name})', fontsize=12, y=0.95)
+        fig.suptitle(f'Forest Health Prediction and Accuracy ({self.test_clf.clf_name})', fontsize=12, y=0.95)
         plt.subplots_adjust(left=0.05, right=0.95, top=0.85, bottom=0.05, wspace=0, hspace=0)
         plt.tight_layout(pad=-1)
 
-        pth = f"{clf_pred.rootpath}/predicting/{clf_pred.lr_range}_years_range"
+        pth = f"{self.test_clf.rootpath}/predicting/{self.test_clf.lr_range}_years_range"
         if not os.path.exists(pth):
             os.makedirs(pth)
-        fp = f"{pth}/Forest_Health_Prediction_{clf_pred.year_range}({clf_pred.clf_name}_thr={threshold}).png"
+        thr = f"_thr={threshold}" if threshold is not None else ""
+        fp = f"{pth}/Forest_Health_Prediction_{self.test_clf.year_range}({self.test_clf.clf_name}{thr}).png"
         plt.savefig(fp)
         print(f"plot saved at {fp}")
 
@@ -733,7 +779,6 @@ class ModelManager:
 
     @staticmethod
     def FH_clf_acc(name, clf, cm):
-
         log_cm = np.log(cm + 1)
 
         fig, ax = plt.subplots(figsize=(10, 10))
