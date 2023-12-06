@@ -57,26 +57,26 @@ class ModelSelection:
             print("File not found: ", sg_h5)
             exit(123)
 
-        # mm_lr = ModelManager(self.sg_values, is_discrete=True)
-        # mm_lr.train_lr(is_plot=True)
-        # result_lr = mm_lr.results_dic["metrics"]
-        #
-        # mm_xgb = ModelManager(self.sg_values)
-        # mm_xgb.train_xgb(is_plot=True)
-        # result_xgb = mm_xgb.results_dic["metrics"]
-        #
-        # mm_dt = ModelManager(self.sg_values)
-        # mm_dt.train_dt(is_plot=True)
-        # result_dt = mm_dt.results_dic["metrics"]
-        #
-        # mm_ens = ModelManager(self.sg_values)
-        # mm_ens.train_ensemble_model([(mm_lr["name"], mm_lr["model"]),
-        #                              (mm_xgb["name"], mm_xgb["model"]),
-        #                              # (name_rf, model_rf),
-        #                              (mm_dt["name"], mm_dt["model"]),
-        #                              # (name_svr, model_svr)
-        #                              ], is_plot=True)
-        # result_ens = mm_ens.results_dic["metrics"]
+        mm_lr = ModelManager(self.sg_values, is_discrete=True)
+        mm_lr.train_lr(is_plot=True)
+        result_lr = mm_lr.results_dic["metrics"]
+
+        mm_xgb = ModelManager(self.sg_values)
+        mm_xgb.train_xgb(is_plot=True)
+        result_xgb = mm_xgb.results_dic["metrics"]
+
+        mm_dt = ModelManager(self.sg_values)
+        mm_dt.train_dt(is_plot=True)
+        result_dt = mm_dt.results_dic["metrics"]
+
+        mm_ens = ModelManager(self.sg_values)
+        mm_ens.train_ensemble_model([(mm_lr["name"], mm_lr["model"]),
+                                     (mm_xgb["name"], mm_xgb["model"]),
+                                     # (name_rf, model_rf),
+                                     (mm_dt["name"], mm_dt["model"]),
+                                     # (name_svr, model_svr)
+                                     ], is_plot=True)
+        result_ens = mm_ens.results_dic["metrics"]
 
         ms_nn4 = ModelManager(self.sg_values, is_discrete=False)
         ms_nn4.train_nn(4, (8, ),
