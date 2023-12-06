@@ -4,3 +4,4 @@
 *.npy
 *.hdf
 src/__pycache__
+*.h5
